@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <string.h>
 
 int pipecmd_preserve;
 
@@ -42,6 +43,8 @@ pid_t pipecmdv(int *fd_tochild, int *fd_fromchild, int *fd_errfromchild,
 	free_noerr(arr);
 	return ret;
 }
+
+int pipecmdarr_DEBUG_OUTPUT_CMD = 0;
 
 pid_t pipecmdarr(int *fd_tochild, int *fd_fromchild, int *fd_errfromchild,
 		 char *const *arr)
@@ -143,6 +146,16 @@ pid_t pipecmdarr(int *fd_tochild, int *fd_fromchild, int *fd_errfromchild,
 		for (int i = 3; i < max; i++)
 			if (i != execfail[1])
 				close(i);
+
+		// if(pipecmdarr_DEBUG_OUTPUT_CMD) {
+
+		// 	printf("[pipecmd]$ %s", arr[0]);
+
+		// 	for(char *const *p = arr + 1; *p; p++)
+		// 		printf(" %s", *p);
+
+		// 	printf("\n");
+		// }
 
 		execvp(arr[0], arr);
 

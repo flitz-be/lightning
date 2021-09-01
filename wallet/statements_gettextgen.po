@@ -1362,7 +1362,7 @@ msgstr ""
 msgid "SELECT COUNT(1) FROM channel_funding_inflights WHERE channel_id = ?;"
 msgstr ""
 
-#: wallet/test/run-wallet.c:1753
+#: wallet/test/run-wallet.c:1754
 msgid "INSERT INTO channels (id) VALUES (1);"
 msgstr ""
-#  SHA256STAMP:e7f23b938c7ee86b0178ca11d8d3df3f08dec52e205e0778be1f5a0b607f52f6
+#  SHA256STAMP:c2d67293515fc2bd53d77ad491c9c02581c5d46aacc06163dd95416a0f4809db

@@ -2,7 +2,8 @@
 set -e
 
 # When run inside docker (from below), we do build and drop result in /release
-if [ x"$1" = x"--inside-docker" ]; then
+if [ "$1" = "--inside-docker" ]; then
+    # https://www.shellcheck.net/wiki/SC2268: Avoid x-prefix in comparisons as it no longer serves a purpose.
     VER="$2"
     git clone /src /build
     cd /build

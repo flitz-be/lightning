@@ -86,7 +86,7 @@ PYTHON_GENERATED=
 
 # Options to pass to cppcheck. Mostly used to exclude files that are
 # generated with external tools that we don't have control over
-CPPCHECK_OPTS=-q --language=c --std=c11 --error-exitcode=1 --suppressions-list=.cppcheck-suppress --inline-suppr
+CPPCHECK_OPTS=--force -q --language=c --std=c11 --error-exitcode=1 --suppressions-list=.cppcheck-suppress --inline-suppr
 
 # This is where we add new features as bitcoin adds them.
 FEATURES :=
@@ -470,7 +470,7 @@ PYLN_PATH=$(shell pwd)/lightningd:$(PATH)
 check-pyln-%: $(BIN_PROGRAMS) $(PKGLIBEXEC_PROGRAMS) $(PLUGINS)
 	@(cd contrib/$(shell echo $@ | cut -b 7-) && PATH=$(PYLN_PATH) PYTHONPATH=$(PYTHONPATH) $(MAKE) check)
 
-check-python: check-python-flake8 check-pytest-pyln-proto check-pyln-client check-pyln-testing
+check-python: check-python-flake8 check-pyln-client check-pyln-testing
 
 check-python-flake8:
 	@# E501 line too long (N > 79 characters)

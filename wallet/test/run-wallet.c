@@ -1582,7 +1582,8 @@ static bool test_channel_inflight_crud(struct lightningd *ld, const tal_t *ctx)
 	funding_sats = AMOUNT_SAT(4444444);
 	our_sats = AMOUNT_SAT(3333333);
 	mempat(&sig.s, sizeof(sig.s));
-	mempat(&cid, sizeof(struct channel_id));
+	mempat(&cid, sizeof(cid));
+	// cppcheck The address of local variable 'cid' might be accessed at non-zero index.
 
 	lease_commit_sig = tal(w, secp256k1_ecdsa_signature);
 	mempat(lease_commit_sig, sizeof(*lease_commit_sig));

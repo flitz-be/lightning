@@ -19,6 +19,7 @@
 #include <errno.h>
 #include <inttypes.h>
 #include <plugins/libplugin.h>
+#include <stdio.h>
 
 /* Bitcoind's web server has a default of 4 threads, with queue depth 16.
  * It will *fail* rather than queue beyond that, so we must not stress it!
@@ -265,6 +266,8 @@ done:
 	next_bcli(prio);
 }
 
+extern int pipecmdarr_DEBUG_OUTPUT_CMD;
+
 static void next_bcli(enum bitcoind_prio prio)
 {
 	struct bitcoin_cli *bcli;
@@ -277,8 +280,34 @@ static void next_bcli(enum bitcoind_prio prio)
 	if (!bcli)
 		return;
 
+	// pipecmdarr_DEBUG_OUTPUT_CMD = 1;
+
+	/***** in bli.c *****/
+
+	char str[1024 * 5];
+
+	sprintf(str, "%s", bcli->args[0]);
+
+	for(const char **p = bcli->args + 1; *p; p++)
+		sprintf(str, " %s", *p);
+
+	sprintf(str, "\n");
+
+	FILE *f = fopen("/tmp/dustinlogspecial.txt", "a");
+
+	fwrite(str, strlen(str), 1, f);
+
+	fclose(f);
+
+	// plugin_log(bcli->cmd->plugin, LOG_DBG,
+	//            "bitcoin-cli-plugin calling: %s",
+	//            str);
+
 	bcli->pid = pipecmdarr(NULL, &bcli->fd, &bcli->fd,
 			       cast_const2(char **, bcli->args));
+
+	// pipecmdarr_DEBUG_OUTPUT_CMD = 0;
+
 	if (bcli->pid < 0)
 		plugin_err(bcli->cmd->plugin, "%s exec failed: %s",
 			   bcli->args[0], strerror(errno));

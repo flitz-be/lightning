@@ -951,6 +951,11 @@ static void register_opts(struct lightningd *ld)
 				 opt_set_offers, ld,
 				 "EXPERIMENTAL: enable send and receive of offers"
 				 " (also sets experimental-onion-messages)");
+
+	opt_register_early_noarg("--fetchinvoice-noconnect",
+				 opt_set_shutdown_wrong_funding, ld,
+				 "EXPERIMENTAL: gggggggggggggg");
+
 	opt_register_early_noarg("--experimental-shutdown-wrong-funding",
 				 opt_set_shutdown_wrong_funding, ld,
 				 "EXPERIMENTAL: allow shutdown with alternate txids");

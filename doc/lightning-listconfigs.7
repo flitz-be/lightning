@@ -30,6 +30,7 @@ showing default values (\fBdev-\fR options are not shown)\.
 
 On success, an object is returned, containing:
 
+
 .RS
 .IP \[bu]
 \fB# version\fR (string, optional): Special field indicating the current version
@@ -90,6 +91,8 @@ On success, an object is returned, containing:
 .IP \[bu]
 \fBexperimental-offers\fR (boolean, optional): \fBexperimental-offers\fR field from config or cmdline, or default
 .IP \[bu]
+\fBfetchinvoice-noconnect\fR (boolean, optional): ggggggggggg
+.IP \[bu]
 \fBexperimental-shutdown-wrong-funding\fR (boolean, optional): \fBexperimental-shutdown-wrong-funding\fR field from config or cmdline, or default
 .IP \[bu]
 \fBrgb\fR (hex, optional): \fBrgb\fR field from config or cmdline, or default (always 6 characters)
@@ -148,7 +151,7 @@ On success, an object is returned, containing:
 .IP \[bu]
 \fBlog-timestamps\fR (boolean, optional): \fBlog-timestamps\fR field from config or cmdline, or default
 .IP \[bu]
-\fBforce-feerates\fR (string, optional): \fBforce-feerates\fR field from config or cmdline, if any
+\fBforce-feerates\fR (string, optional): force-feerate configuration setting, if any
 .IP \[bu]
 \fBsubdaemon\fR (string, optional): \fBsubdaemon\fR fields from config or cmdline if any (can be more than one)
 .IP \[bu]
@@ -157,6 +160,7 @@ On success, an object is returned, containing:
 .RE
 
 On failure, one of the following error codes may be returned:
+
 
 .RS
 .IP \[bu]
@@ -270,4 +274,4 @@ Vincenzo Palazzo \fI<vincenzo.palazzo@protonmail.com\fR> wrote the initial versi
 
 Main web site: \fIhttps://github.com/ElementsProject/lightning\fR
 
-\" SHA256STAMP:4591f6c754162b2dcdf82a36d584a48795752d39a986bc1d39c49e0cdbea440f
+\" SHA256STAMP:3104ea4df88afd20e916e9537899aa73775cd0447e379b9fd47fe98d10c9627c

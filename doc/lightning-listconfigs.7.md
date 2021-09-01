@@ -55,6 +55,7 @@ On success, an object is returned, containing:
 - **experimental-dual-fund** (boolean, optional): `experimental-dual-fund` field from config or cmdline, or default
 - **experimental-onion-messages** (boolean, optional): `experimental-onion-messages` field from config or cmdline, or default
 - **experimental-offers** (boolean, optional): `experimental-offers` field from config or cmdline, or default
+- **fetchinvoice-noconnect** (boolean, optional): ggggggggggg
 - **experimental-shutdown-wrong-funding** (boolean, optional): `experimental-shutdown-wrong-funding` field from config or cmdline, or default
 - **rgb** (hex, optional): `rgb` field from config or cmdline, or default (always 6 characters)
 - **alias** (string, optional): `alias` field from config or cmdline, or default
@@ -84,7 +85,7 @@ On success, an object is returned, containing:
 - **log-prefix** (string, optional): `log-prefix` field from config or cmdline, or default
 - **log-file** (string, optional): `log-file` field from config or cmdline, or default
 - **log-timestamps** (boolean, optional): `log-timestamps` field from config or cmdline, or default
-- **force-feerates** (string, optional): `force-feerates` field from config or cmdline, if any
+- **force-feerates** (string, optional): force-feerate configuration setting, if any
 - **subdaemon** (string, optional): `subdaemon` fields from config or cmdline if any (can be more than one)
 - **tor-service-password** (string, optional): `tor-service-password` field from config or cmdline, if any
 [comment]: # (GENERATE-FROM-SCHEMA-END)
@@ -204,4 +205,4 @@ RESOURCES
 ---------
 
 Main web site: <https://github.com/ElementsProject/lightning>
-[comment]: # ( SHA256STAMP:ad98179a7b6254a936d4fde179918b6a975e186adcbc396917a0c2ed2888519e)
+[comment]: # ( SHA256STAMP:f6c3c6112f42393ab8887a2406647784dd58d90201a49800956f35c90de626d8)
