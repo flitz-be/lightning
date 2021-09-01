@@ -214,11 +214,22 @@ valgrind --run make
 To Build on macOS
 ---------------------
 
-Assuming you have Xcode and Homebrew installed. Install dependencies:
+Assuming you have Xcode and Homebrew installed.
 
-    $ brew install autoconf automake libtool python3 gmp gnu-sed gettext libsodium
+Be sure the Xcode command line tools are installed:
+
+    $ xcode-select --install
+
+Install dependencies:
+
+    $ brew tap cuber/homebrew-libsecp256k1
+    $ brew install autoconf automake libtool python3 gmp gnu-sed gettext libsodium cppcheck shellcheck libsecp256k1
     $ ln -s /usr/local/Cellar/gettext/0.20.1/bin/xgettext /usr/local/opt
     $ export PATH="/usr/local/opt:$PATH"
+    
+If you run into secp256k1 linker issues:
+
+    $ brew link --overwrite libsecp256k1
 
 If you need SQLite (or get a SQLite mismatch build error):
 
@@ -226,13 +237,20 @@ If you need SQLite (or get a SQLite mismatch build error):
     $ export LDFLAGS="-L/usr/local/opt/sqlite/lib"
     $ export CPPFLAGS="-I/usr/local/opt/sqlite/include"
 
-If you need Python 3.x for mako (or get a mako build error):
+If you need Python 3.x for mako and mrkd (or get a python build error):
 
     $ brew install pyenv
     $ echo -e 'if command -v pyenv 1>/dev/null 2>&1; then\n  eval "$(pyenv init -)"\nfi' >> ~/.bash_profile
-    $ source ~/.bash_profile
+    $ echo -e 'export PATH=$PATH:~/.local/bin' >> ~/.bash_profile
     $ pyenv install 3.7.4
     $ pip install --upgrade pip
+    $ pip install -r requirements.txt
+    $ source ~/.bash_profile
+
+Git with perl compatible regex is required. Git added this in version 2.33 so you may need to replace the built in git with the latest from brew
+
+    $ brew install git
+    $ brew link --overwrite git
 
 If you don't have bitcoind installed locally you'll need to install that
 as well:
@@ -253,11 +271,6 @@ Configure Python 3.x & get mako:
 
     $ pyenv local 3.7.4
     $ pip install mako
-
-Build lightning:
-
-    $ ./configure
-    $ make
 
 Running lightning:
 
