@@ -554,20 +554,42 @@ static struct msg_update_fulfill_htlc *fromwire_struct_update_fulfill_htlc(const
 static void *towire_struct_commitment_signed(const tal_t *ctx,
 				      const struct msg_commitment_signed *s)
 {
+#if EXPERIMENTAL_FEATURES
+	struct tlv_commitment_signed_tlvs *cs_tlvs;
+
+	cs_tlvs = tlv_commitment_signed_tlvs_new(ctx);
+	return towire_commitment_signed(ctx,
+					&s->channel_id,
+					&s->signature,
+					s->htlc_signature,
+					cs_tlvs);
+#else
 	return towire_commitment_signed(ctx,
 					&s->channel_id,
 					&s->signature,
 					s->htlc_signature);
+#endif /* EXPERIMENTAL_FEATURES */
 }
 
 static struct msg_commitment_signed *fromwire_struct_commitment_signed(const tal_t *ctx, const void *p)
 {
 	struct msg_commitment_signed *s = tal(ctx, struct msg_commitment_signed);
 
+#if EXPERIMENTAL_FEATURES
+	struct tlv_commitment_signed_tlvs *cs_tlvs;
+
+	cs_tlvs = tlv_commitment_signed_tlvs_new(ctx);
+	if (!fromwire_commitment_signed(s, p,
+				&s->channel_id,
+				&s->signature,
+				&s->htlc_signature,
+				cs_tlvs))
+#else
 	if (!fromwire_commitment_signed(s, p,
 				&s->channel_id,
 				&s->signature,
 				&s->htlc_signature))
+#endif /* EXPERIMENTAL_FEATURES */
 		return tal_free(s);
 	return s;
 }
