@@ -1,0 +1,17 @@
+- move channel into stfu mode; fail if already in stfu mode
+- send splice 
+- negotiate the tx 
+	- reuse the interactive transaction building messages (init_rbf -> )
+- on reconnect, restart
+- tx_complete rcvd, validate splice tx
+- tx-sigs are exchanged... move out of stfu mode
+- broadcast signed splice tx
+- on reconnect, handle re-transmission of tx-sigs
+- normal channel operation; 
+	- every commit_sigs, send commitment signatures for splice tx as well
+	- bound the amount to route to the new splice amounts (min inprogress balance)
+- splice_locked sent + rcvd;
+	- clear out all inflight splice txs
+	- delete all commitment_sig data related to it
+	- update funding tx to be new thing whatever
+- go back to "normal" channel operation (no extra commit_sigs or splice amount checks)
