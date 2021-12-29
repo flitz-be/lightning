@@ -89,8 +89,11 @@ OPENINGD_COMMON_OBJS :=				\
 	gossipd/gossip_store_wiregen.o		\
 	gossipd/gossipd_peerd_wiregen.o
 
+OPENINGD_INTERFACE_OBJS :=				\
+	interface/tx_state.o
+
 lightningd/lightning_openingd: $(OPENINGD_OBJS) $(OPENINGD_COMMON_OBJS) $(WIRE_OBJS) $(BITCOIN_OBJS) $(HSMD_CLIENT_OBJS)
 
-lightningd/lightning_dualopend: $(DUALOPEND_OBJS) $(OPENINGD_COMMON_OBJS) $(WIRE_OBJS) $(BITCOIN_OBJS) $(HSMD_CLIENT_OBJS)
+lightningd/lightning_dualopend: $(DUALOPEND_OBJS) $(OPENINGD_INTERFACE_OBJS) $(OPENINGD_COMMON_OBJS) $(WIRE_OBJS) $(BITCOIN_OBJS) $(HSMD_CLIENT_OBJS)
 
 -include openingd/test/Makefile
