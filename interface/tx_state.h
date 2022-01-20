@@ -106,7 +106,10 @@ struct inprog_state {
 
 bool send_next(struct inprog_state *state,
 	       struct inprog_tx_state *tx_state,
-	       struct wally_psbt **psbt);
+	       struct wally_psbt **psbt,
+	       struct wally_psbt *(*fetch_psbt_changes)(void *state_ptr,
+							void *tx_state_ptr,
+							const struct wally_psbt *psbt));
 
 void add_funding_output(struct inprog_tx_state *tx_state,
 			       struct inprog_state *state,
@@ -116,9 +119,14 @@ void add_funding_output(struct inprog_tx_state *tx_state,
 // WIRE_TX_REMOVE_INPUT
 // WIRE_TX_ADD_OUTPUT
 // WIRE_TX_REMOVE_OUTPUT
-bool run_tx_interactive(struct inprog_state *state,
+// Returns a human description of error on failure, NULL on success
+char *run_tx_interactive(struct inprog_state *state,
 			       struct inprog_tx_state *tx_state,
 			       struct wally_psbt **orig_psbt,
-			       enum tx_role our_role);
+			       enum tx_role our_role,
+			       struct wally_psbt *(*fetch_psbt_changes)(void *state_ptr,
+									void *tx_state_ptr,
+									const struct wally_psbt *psbt)
+			       );
 
 #endif /* LIGHTNING_INTERACTIVE_TX_STATE_H */

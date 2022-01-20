@@ -1134,6 +1134,36 @@ static u8 *opening_negotiate_msg(const tal_t *ctx, struct state *state)
 	}
 }
 
+static struct wally_psbt *
+fetch_psbt_changes(void *state_ptr,
+				   void *tx_state_ptr,
+				   const struct wally_psbt *psbt)
+{
+	struct state *state = (struct state*)state_ptr;
+	struct tx_state *tx_state = (struct tx_state*)tx_state_ptr;
+
+	u8 *msg;
+	char *err;
+	struct wally_psbt *updated_psbt;
+
+	/* Go ask lightningd what other changes we've got */
+	msg = towire_dualopend_psbt_changed(NULL, &state->channel_id,
+									    tx_state->funding_serial,
+									    psbt);
+
+	wire_sync_write(REQ_FD, take(msg));
+	msg = wire_sync_read(tmpctx, REQ_FD);
+
+	if (fromwire_dualopend_fail(msg, msg, &err)) {
+		open_err_warn(state, "%s", err);
+	} else if (fromwire_dualopend_psbt_updated(state, msg, &updated_psbt)) {
+		return updated_psbt;
+	} else
+		master_badmsg(fromwire_peektype(msg), msg);
+
+	return NULL;
+}
+
 // Start here -- Lisa
 // Pull this out into common library
 // put it into common (interactive)
@@ -1487,7 +1517,7 @@ static u8 *opening_negotiate_msg(const tal_t *ctx, struct state *state)
 // 		}
 
 // 		if (!(we_complete && they_complete))
-// 			we_complete = !send_next(state, tx_state, &psbt);
+// 			we_complete = !send_next(state, tx_state, &psbt, fetch_psbt_changes);
 // 	}
 
 // 	/* Sort psbt! */
@@ -2166,8 +2196,16 @@ static void accepter_start(struct state *state, const u8 *oc2_msg)
 	 * to an invalid number, 1 (initiator sets; valid is even) */
 	tx_state->funding_serial = 1;
 	/* Figure out what the funding transaction looks like! */
-	if (!run_tx_interactive((struct inprog_state*)state, (struct inprog_tx_state*)tx_state, &tx_state->psbt, TX_ACCEPTER))
+	char *run_tx_error = run_tx_interactive((struct inprog_state*)state,
+											(struct inprog_tx_state*)tx_state,
+											&tx_state->psbt,
+											TX_ACCEPTER,
+											fetch_psbt_changes);
+
+	if (run_tx_error) {
+		open_err_fatal(state, "%s", run_tx_error);
 		return;
+	}
 
 	msg = accepter_commits(state, tx_state, total,
 			       lease_fee, &err_reason);
@@ -2774,12 +2812,16 @@ static void opener_start(struct state *state, u8 *msg)
 	}
 
 	/* Send our first message, we're opener we initiate here */
-	if (!send_next((struct inprog_state*)state, (struct inprog_tx_state*)tx_state, &tx_state->psbt))
+	if (!send_next((struct inprog_state*)state, (struct inprog_tx_state*)tx_state, &tx_state->psbt, fetch_psbt_changes))
 		open_err_warn(state, "%s", "Peer error, no updates to send");
 
 	/* Figure out what the funding transaction looks like! */
-	if (!run_tx_interactive((struct inprog_state*)state, (struct inprog_tx_state*)tx_state, &tx_state->psbt, TX_INITIATOR))
+	char *run_tx_error = run_tx_interactive((struct inprog_state*)state, (struct inprog_tx_state*)tx_state, &tx_state->psbt, TX_INITIATOR, fetch_psbt_changes);
+
+	if (run_tx_error) {
+		open_err_fatal(state, "%s", run_tx_error);
 		return;
+	}
 
 	msg = opener_commits(state, tx_state, total, lease_fee, &err_reason);
 	if (!msg) {
@@ -2845,7 +2887,7 @@ static void rbf_wrap_up(struct state *state,
 
 	if (state->our_role == TX_INITIATOR) {
 		/* Send our first message; opener initiates */
-		if (!send_next((struct inprog_state*)state, (struct inprog_tx_state*)tx_state, &tx_state->psbt)) {
+		if (!send_next((struct inprog_state*)state, (struct inprog_tx_state*)tx_state, &tx_state->psbt, fetch_psbt_changes)) {
 			open_err_warn(state,
 				      "Peer error, has no tx updates.");
 			tal_free(tx_state);
@@ -2853,10 +2895,14 @@ static void rbf_wrap_up(struct state *state,
 		}
 	}
 
-	if (!run_tx_interactive((struct inprog_state*)state, (struct inprog_tx_state*)tx_state,
-				&tx_state->psbt,
-				state->our_role)) {
+	char *run_tx_error = run_tx_interactive((struct inprog_state*)state, (struct inprog_tx_state*)tx_state,
+											&tx_state->psbt,
+											state->our_role,
+											fetch_psbt_changes);
+
+	if (run_tx_error) {
 		tal_free(tx_state);
+		open_err_fatal(state, "%s", run_tx_error);
 		return;
 	}
 
