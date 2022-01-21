@@ -111,10 +111,6 @@ bool send_next(struct inprog_state *state,
 							void *tx_state_ptr,
 							const struct wally_psbt *psbt));
 
-void add_funding_output(struct inprog_tx_state *tx_state,
-			       struct inprog_state *state,
-			       struct amount_sat total);
-
 // WIRE_TX_ADD_INPUT
 // WIRE_TX_REMOVE_INPUT
 // WIRE_TX_ADD_OUTPUT

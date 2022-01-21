@@ -2499,6 +2499,27 @@ static u8 *opener_commits(struct state *state,
 
 }
 
+static void add_funding_output(struct inprog_tx_state *tx_state,
+			       struct inprog_state *state,
+			       struct amount_sat total)
+{
+	const u8 *wscript;
+	struct wally_psbt_output *funding_out;
+
+	wscript = bitcoin_redeem_2of2(tmpctx, &state->our_funding_pubkey,
+				      &state->their_funding_pubkey);
+	funding_out = psbt_append_output(tx_state->psbt,
+					 scriptpubkey_p2wsh(tmpctx, wscript),
+					 total);
+
+	/* Add a serial_id for this output */
+	tx_state->funding_serial = psbt_new_input_serial(tx_state->psbt,
+							 TX_INITIATOR);
+	psbt_output_set_serial_id(tx_state->psbt,
+				  funding_out,
+				  tx_state->funding_serial);
+}
+
 static void opener_start(struct state *state, u8 *msg)
 {
 	struct tlv_opening_tlvs *open_tlv;
