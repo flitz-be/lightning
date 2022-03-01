@@ -137,6 +137,8 @@ start_ln() {
 		echo "Making \"default\" bitcoind wallet."
 		bitcoin-cli -regtest createwallet default
 		bitcoin-cli -regtest generatetoaddress 1 "$(bitcoin-cli -regtest getnewaddress)" > /dev/null
+	else
+		bitcoin-cli -regtest loadwallet default
 	fi
 	alias bt-cli='bitcoin-cli -regtest'
 
