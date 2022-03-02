@@ -2215,7 +2215,7 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 
 	char *error = process_interactivetx_updates(&ictx);
 
-	if(error) {
+	if(error) { // error is "Invalid tx sent."
 
 		DLOG(error);
 		peer_failed_err(peer->pps, &peer->channel_id,
@@ -2313,6 +2313,9 @@ static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 				 amount_sat(0));
 
 	psbt_output_set_serial_id(tmpctx, out, 420420);
+
+	// TODO: this will generate serial_ids -> psbt_add_serials()
+	
 
 	DLOG("handle_peer_splice_ack.5 (desired psbt):");
 

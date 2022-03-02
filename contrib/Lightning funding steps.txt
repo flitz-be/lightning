@@ -1,0 +1,22 @@
+Lightning funding steps
+
+bt-cli createwallet w1
+ADDRESS=`bt-cli getnewaddress`
+bt-cli generatetoaddress 50 $ADDRESS
+
+# echo $ADDRESS
+# bt-cli getbalance
+
+L2_NODE_ID=`l2-cli getinfo | jq -r .id`
+L2_NODE_PORT=`l2-cli getinfo | jq .binding[0].port`
+l1-cli connect $L2_NODE_ID@localhost:$L2_NODE_PORT
+
+# l1-cli listpeers
+
+L1_WALLET_ADDR=`l1-cli newaddr | jq .bech32`
+bt-cli sendtoaddress $L1_WALLET_ADDR 1000
+
+bt-cli generatetoaddress 6 $ADDRESS
+
+# l1-cli listfunds
+

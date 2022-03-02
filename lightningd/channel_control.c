@@ -1123,7 +1123,12 @@ static struct command_result *json_splice_init(struct command *cmd,
 
 	msg = towire_channeld_splice_init(NULL);
 
-	subd_send_msg(channel->owner, take(msg));
+	subd_send_msg(channel->owner, take(msg)); // <-- crash here. 
+// * thread #1, queue = 'com.apple.main-thread', stop reason = EXC_BAD_ACCESS (code=1, address=0x58)
+//    831 		 FIXME: We should use unique upper bits for each daemon, then
+//    832 		 * have generate-wire.py add them, just assert here. 
+// -> 833 		assert(!strstarts(sd->msgname(type), "INVALID"));
+
 
 	return command_still_pending(cmd);
 }
