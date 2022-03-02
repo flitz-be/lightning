@@ -153,39 +153,58 @@ start_ln() {
 
 fund_ln() {
 
+	if [ -z "$1" ]; then
+		node1=1
+	else
+		node1="$1"
+	fi
+
+	if [ -z "$2" ]; then
+		node2=2
+	else
+		node2="$2"
+	fi
+
 	ADDRESS=`bitcoin-cli -regtest getnewaddress`
+
+	echo "minning into address " $ADDRESS
+
 	bitcoin-cli -regtest generatetoaddress 50 $ADDRESS
 
-	echo $ADDRESS
+	echo "Mined into $ADDRESS, checking balance"
 	bitcoin-cli -regtest getbalance
 
-	L2_NODE_ID=`$LCLI --lightning-dir=/tmp/l2-regtest getinfo | jq -r .id`
-	L2_NODE_PORT=`$LCLI --lightning-dir=/tmp/l2-regtest getinfo | jq .binding[0].port`
+	L2_NODE_ID=`$LCLI --lightning-dir=/tmp/l$node2-regtest getinfo | jq -r .id`
+	L2_NODE_PORT=`$LCLI --lightning-dir=/tmp/l$node2-regtest getinfo | jq .binding[0].port`
 
 	echo "Node 2 id/port is : $L2_NODE_ID:$L2_NODE_PORT"
 
-	$LCLI --lightning-dir=/tmp/l1-regtest connect $L2_NODE_ID@localhost:$L2_NODE_PORT
+	$LCLI --lightning-dir=/tmp/l$node1-regtest connect $L2_NODE_ID@localhost:$L2_NODE_PORT
 
-	$LCLI --lightning-dir=/tmp/l1-regtest listpeers
+	$LCLI --lightning-dir=/tmp/l$node1-regtest listpeers
 
-	L1_WALLET_ADDR=`$LCLI --lightning-dir=/tmp/l1-regtest newaddr | jq -r .bech32`
+	L1_WALLET_ADDR=`$LCLI --lightning-dir=/tmp/l$node1-regtest newaddr | jq -r .bech32`
 
 	echo bitcoin-cli -regtest sendtoaddress $L1_WALLET_ADDR 1000
 
 	bitcoin-cli -regtest sendtoaddress $L1_WALLET_ADDR 1000
 
-	bitcoin-cli -regtest generatetoaddress 6 $ADDRESS
+	bitcoin-cli -regtest generatetoaddress 24 $ADDRESS
 
-	$LCLI --lightning-dir=/tmp/l1-regtest listfunds
+	CHANNEL_RESULT=`$LCLI --lightning-dir=/tmp/l$node1-regtest fundchannel $L2_NODE_ID 1000000`
 
-	L_CHANNEL_ID=`$LCLI --lightning-dir=/tmp/l1-regtest fundchannel $L2_NODE_ID 1000000 | jq -r .channel_id`
+	echo $CHANNEL_RESULT
+
+	L_CHANNEL_ID=`echo $CHANNEL_RESULT | jq -r .channel_id`
 
 	echo channel id is: $L_CHANNEL_ID
 
 	bitcoin-cli -regtest generatetoaddress 12 $ADDRESS
 
-	$LCLI --lightning-dir=/tmp/l1-regtest listchannels
-	$LCLI --lightning-dir=/tmp/l2-regtest listchannels
+	sleep 6
+
+	$LCLI --lightning-dir=/tmp/l$node1-regtest listchannels
+	$LCLI --lightning-dir=/tmp/l$node2-regtest listchannels
 }
 
 stop_nodes() {
