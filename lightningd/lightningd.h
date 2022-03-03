@@ -188,6 +188,9 @@ struct lightningd {
 	/* Outstanding ping commands. */
 	struct list_head ping_commands;
 
+	/* Outstanding splice commands. */
+	struct list_head splice_commands;
+
 	/* Maintained by invoices.c */
 	struct invoices *invoices;
 

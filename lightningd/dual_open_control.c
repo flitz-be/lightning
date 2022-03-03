@@ -3381,3 +3381,11 @@ void peer_start_dualopend(struct peer *peer, struct peer_fd *peer_fd)
 
 	start_fresh_dualopend(peer, peer_fd, channel);
 }
+
+
+
+
+
+
+
+
