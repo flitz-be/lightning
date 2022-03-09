@@ -49,6 +49,8 @@ static bool unknown_type(enum peer_wire t)
 	case WIRE_ACK_RBF:
 #if EXPERIMENTAL_FEATURES
 	case WIRE_STFU:
+	case WIRE_SPLICE:
+	case WIRE_SPLICE_ACK:
 #endif
 		return false;
 	}
@@ -103,6 +105,8 @@ bool is_msg_for_gossipd(const u8 *cursor)
 	case WIRE_ONION_MESSAGE:
 #if EXPERIMENTAL_FEATURES
 	case WIRE_STFU:
+	case WIRE_SPLICE:
+	case WIRE_SPLICE_ACK:
 #endif
 		break;
 	}
@@ -157,6 +161,8 @@ bool is_msg_gossip_broadcast(const u8 *cursor)
 	case WIRE_ACK_RBF:
 #if EXPERIMENTAL_FEATURES
 	case WIRE_STFU:
+	case WIRE_SPLICE:
+	case WIRE_SPLICE_ACK:
 #endif
 		break;
 	}
@@ -398,6 +404,23 @@ bool extract_channel_id(const u8 *in_pkt, struct channel_id *channel_id)
 		 * 1. type: 2 (`stfu`)
 		 * 2. data:
 		 *     * [`channel_id`:`channel_id`]
+		 */
+	case WIRE_SPLICE:
+		/* BOLT-splice #2:
+		 * 1. type: 74 (`splice`)
+		 * 2. data:
+		 *     * [`chain_hash`:`chain_hash`]
+		 *     * [`channel_id`:`channel_id`]
+		 *     * [`u32`:`funding_feerate_perkw`]
+		 *     * [`point`:`funding_pubkey`]
+		 */
+	case WIRE_SPLICE_ACK:
+		/* BOLT-splice #2:
+		 * 1. type: 76 (`splice_ack`)
+		 * 2. data:
+		 *     * [`chain_hash`:`chain_hash`]
+		 *     * [`channel_id`:`channel_id`]
+		 *     * [`point`:`funding_pubkey`]
 		 */
 #endif
 		return fromwire_channel_id(&cursor, &max, channel_id);
