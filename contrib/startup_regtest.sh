@@ -169,7 +169,7 @@ fund_ln() {
 
 	echo "minning into address " $ADDRESS
 
-	bitcoin-cli -regtest generatetoaddress 50 $ADDRESS
+	bitcoin-cli -regtest generatetoaddress 125 $ADDRESS
 
 	echo "Mined into $ADDRESS, checking balance"
 	bitcoin-cli -regtest getbalance
