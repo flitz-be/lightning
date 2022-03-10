@@ -33,6 +33,16 @@ struct splice_command {
 	struct channel *channel;
 };
 
+static void DLOG(const char *str)
+{
+	int fd = open("/tmp/dustin.txt", O_CREAT|O_RDWR|O_APPEND);
+
+	write(fd, str, strlen(str));
+	write(fd, "\n", 1);
+
+	close(fd);
+}
+
 static void update_feerates(struct lightningd *ld, struct channel *channel)
 {
 	u8 *msg;
@@ -539,6 +549,8 @@ static unsigned channel_msg(struct subd *sd, const u8 *msg, const int *fds)
 		break;
 	case WIRE_CHANNELD_SPLICE_CONFIRMED_INIT:
 	{
+		DLOG("WE GOT INTO CHANNELGE_MSG");
+
 		struct splice_command *cc;
 		struct splice_command *n;
 
@@ -1080,6 +1092,8 @@ static struct command_result *json_splice_init(struct command *cmd,
 		   NULL))
 		return command_param_failed();
 
+	DLOG("json_splice_init");
+
 	peer = peer_by_id(cmd->ld, id);
 	if (!peer) {
 		return command_fail(cmd, FUNDING_UNKNOWN_PEER, "Unknown peer");
@@ -1104,6 +1118,9 @@ static struct command_result *json_splice_init(struct command *cmd,
 	cc->cmd = cmd;
 	cc->channel = channel;
 
+	assert(channel);
+	assert(channel->owner);
+
 	msg = towire_channeld_splice_init(NULL);
 
 	subd_send_msg(channel->owner, take(msg)); // <-- crash here. 
@@ -1123,7 +1140,44 @@ static const struct json_command splice_init_command = {
 	"Init a channel splice to {id} with {initialpsbt} for {amount} satoshis. "
 	"Returns updated {psbt} with (partial) contributions from peer"
 };
+/*
+static const struct json_command splice_update_command = {
+	"splice_update",
+	"channels",
+	json_splice_update,
+	"Update {channel_id} with {psbt}. "
+	"Returns updated {psbt} with (partial) contributions from peer. "
+	"If {commitments_secured} is true, next call should be to openchannel_signed"
+};
+
+static const struct json_command splice_signed_command = {
+	"splice_signed",
+	"channels",
+	json_splice_signed,
+	"Send our {signed_psbt}'s tx sigs for {channel_id}."
+};
+
+static const struct json_command splice_bump_command = {
+	"splice_bump",
+	"channels",
+	json_splice_bump,
+	"Attempt to bump the fee on {channel_id}'s funding transaction."
+};
+
+static const struct json_command splice_abort_command = {
+	"splice_abort",
+	"channels",
+	json_splice_abort,
+	"Abort {channel_id}'s open. Usable while `commitment_signed=false`."
+};
+*/
 AUTODATA(json_command, &splice_init_command);
+/*
+AUTODATA(json_command, &splice_update_command);
+AUTODATA(json_command, &splice_signed_command);
+AUTODATA(json_command, &splice_bump_command);
+AUTODATA(json_command, &splice_abort_command);
+*/
 
 #if DEVELOPER
 static struct command_result *json_dev_feerate(struct command *cmd,
@@ -1175,6 +1229,8 @@ static const struct json_command dev_feerate_command = {
 
 AUTODATA(json_command, &dev_feerate_command);
 
+
+
 #if EXPERIMENTAL_FEATURES
 static void quiesce_reply(struct subd *channeld UNUSED,
 			  const u8 *reply,
@@ -1225,3 +1281,13 @@ static const struct json_command dev_quiesce_command = {
 AUTODATA(json_command, &dev_quiesce_command);
 #endif /* EXPERIMENTAL_FEATURES */
 #endif /* DEVELOPER */
+
+
+
+
+
+
+
+
+
+

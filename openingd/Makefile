@@ -51,6 +51,7 @@ OPENINGD_COMMON_OBJS :=				\
 	common/gossip_store.o			\
 	common/htlc_state.o			\
 	common/htlc_wire.o			\
+	common/interactivetx.o			\
 	common/initial_channel.o		\
 	common/initial_commit_tx.o		\
 	common/key_derive.o			\

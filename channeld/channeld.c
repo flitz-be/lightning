@@ -48,6 +48,16 @@
 #include <wire/peer_wire.h>
 #include <wire/wire_sync.h>
 
+static void DLOG(const char *str)
+{
+	int fd = open("/tmp/dustin.txt", O_CREAT|O_RDWR|O_APPEND);
+
+	write(fd, str, strlen(str));
+	write(fd, "\n", 1);
+
+	close(fd);
+}
+
 /* stdin == requests, 3 == peer, 4 = HSM */
 #define MASTER_FD STDIN_FILENO
 #define HSM_FD 4
@@ -253,8 +263,12 @@ static struct amount_msat advertized_htlc_max(const struct channel *channel)
 #if EXPERIMENTAL_FEATURES
 static void maybe_send_stfu(struct peer *peer)
 {
+	DLOG("maybe_send_stfu.1");
+
 	if (!peer->stfu)
 		return;
+
+	DLOG("maybe_send_stfu.2");
 
 	if (!peer->stfu_sent[LOCAL] && !pending_updates(peer->channel, LOCAL, false)) {
 		u8 *msg = towire_stfu(NULL, &peer->channel_id,
@@ -263,10 +277,18 @@ static void maybe_send_stfu(struct peer *peer)
 		peer->stfu_sent[LOCAL] = true;
 	}
 
+	DLOG("maybe_send_stfu.3");
+
 	if (peer->stfu_sent[LOCAL] && peer->stfu_sent[REMOTE]) {
+
+		DLOG("maybe_send_stfu.3.1");
+
+
 		status_unusual("STFU complete: we are quiescent");
 		wire_sync_write(MASTER_FD,
 				towire_channeld_dev_quiesce_reply(tmpctx));
+
+		DLOG("maybe_send_stfu.3.2");
 
 		if(peer->on_stfu_success) {
 
@@ -274,10 +296,15 @@ static void maybe_send_stfu(struct peer *peer)
 			peer->on_stfu_success = NULL;
 		}
 	}
+
+	DLOG("maybe_send_stfu.4");
+
 }
 
 static void handle_stfu(struct peer *peer, const u8 *stfu)
 {
+	DLOG("handle_stfu.1");
+
 	struct channel_id channel_id;
 	u8 remote_initiated;
 
@@ -327,6 +354,9 @@ static void handle_stfu(struct peer *peer, const u8 *stfu)
 	 *     - MUST reply with `stfu` once it can do so.
 	 */
 	peer->stfu_sent[REMOTE] = true;
+
+	DLOG("handle_stfu.100");
+
 
 	maybe_send_stfu(peer);
 }
@@ -2144,9 +2174,17 @@ static struct wally_psbt *next_splice_step(struct interactivetx_context *ictx)
 	/* Accepter accepts everything for now. */
 	if(ictx->our_role == TX_ACCEPTER) {
 
-		DLOG("Accepter is returning NULL");
+		DLOG("accepter now has this psbt:");
+		DLOG(psbt_to_b64(tmpctx, ictx->current_psbt));
+
+		DLOG("Accepter is returning NULL (aka tx_complete)");
 		return NULL;
 	}
+
+	DLOG("INITIATER next_splice_step called!!!");
+
+	DLOG("INITIATER current_psbt is now:");
+	DLOG(psbt_to_b64(tmpctx, ictx->current_psbt));
 
 	return ictx->desired_psbt;
 }
@@ -2155,6 +2193,8 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 {
 	u8 *msg;
 	struct interactivetx_context ictx;
+
+	DLOG("We got the splice messssaggggeee!!!");
 
 	msg = towire_splice_ack(NULL, &peer->channel_id);
 	peer_write(peer->pps, take(msg));
@@ -2183,18 +2223,41 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 
 	if(error) { // error is "Invalid tx sent."
 
+		DLOG(error);
 		peer_failed_err(peer->pps, &peer->channel_id,
 				"Interactive splicing error: %s", error);
 	}
+
+	struct wally_tx_output *newChanOutpoint = &ictx.current_psbt->tx->outputs[0];
+
+	newChanOutpoint->satoshi = peer->channel->funding_sats.satoshis - 500;
+
+	psbt_elements_normalize_fees(ictx.current_psbt);
+
+	// struct bitcoin_tx *bitcoin_tx = bitcoin_tx_with_psbt(tmpctx, ictx->current_psbt);
+
+	// msg = towire_hsmd_sign_remote_commitment_tx(tmpctx, bitcoin_tx,
+	// 					   &peer->channel->funding_pubkey[REMOTE],
+	// 					   &peer->remote_per_commit,
+	// 					    channel_has(peer->channel,
+	// 							OPT_STATIC_REMOTEKEY));
+
+	DLOG("handle_peer_splice success!!! resulting psbt:");
+	DLOG(psbt_to_b64(tmpctx, ictx.current_psbt));
+
+	// u32 ourFeerate = channel_feerate(peer->channel, LOCAL);
+	// u32 theirFeerate = channel_feerate(peer->channel, REMOTE);
 }
 
 static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 {
 	const u8 *redeemscript;
+	const u8 *msg;
+	struct bitcoin_signature commit_sig;
 	struct interactivetx_context ictx;
-	u32 sequence = 0;
-	struct wally_psbt_input *in;
 	struct wally_psbt_output *out;
+	struct wally_psbt_input *in;
+	u32 sequence = 0;
 
 	ictx.ctx = peer;
 	ictx.our_role = TX_INITIATOR;
@@ -2220,9 +2283,13 @@ static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 
 	assert(NUM_SIDES == 2);
 
+	DLOG("handle_peer_splice_ack.5");
+
 	redeemscript = bitcoin_redeem_2of2(tmpctx,
 					   &peer->channel->funding_pubkey[0],
 					   &peer->channel->funding_pubkey[1]);
+
+	DLOG("handle_peer_splice_ack.6");
 
 	/* First we spend the existing channel outpoint
 	 * 
@@ -2232,19 +2299,28 @@ static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 	 *       transaction output.
 	 */
 	in = psbt_append_input(ictx.desired_psbt, &peer->channel->funding, sequence,
-			       NULL, redeemscript, NULL);
+			       NULL, NULL, redeemscript);
 
-	psbt_input_set_serial_id(tmpctx, in, 69420);
+	DLOG("handle_peer_splice_ack.7");
 
 	/* Segwit requires us to store the value of the outpoint being spent,
 	 * so let's do that */
 
-	u8 *scriptPubkey = scriptpubkey_p2wsh(ictx.desired_psbt, redeemscript);
+	u8 *scriptPubkey = scriptpubkey_p2wsh(tmpctx, redeemscript);
 
 	DLOG("handle_peer_splice_ack.7.1");
 
 	psbt_input_set_wit_utxo(ictx.desired_psbt, 0,
 				scriptPubkey, peer->channel->funding_sats);
+
+	// struct amount_asset asset = amount_sat_to_asset(&peer->channel->funding_sats,
+	// 						chainparams->fee_asset_tag);
+
+	DLOG("handle_peer_splice_ack.8");
+	
+	// psbt_elements_input_set_asset(ictx.desired_psbt, 0, &asset);
+
+	DLOG("handle_peer_splice_ack.9");
 
 	/* Next we add the new channel outpoint, with a 0 amount for now. It
 	 * will be filled in later.
@@ -2256,18 +2332,64 @@ static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 	 *       funding keys using the higher of the two `generation` fields.
 	 */
 	out = psbt_append_output(ictx.desired_psbt,
-				 redeemscript,
+				 scriptpubkey_p2wsh(tmpctx, redeemscript),
 				 amount_sat(0));
 
-	psbt_output_set_serial_id(tmpctx, out, 420420);
+	psbt_add_serials(ictx.desired_psbt, ictx.our_role);
+	psbt_sort_by_serial_id(ictx.desired_psbt);
+
+	DLOG("handle_peer_splice_ack.5 (desired psbt):");
+
+	DLOG(psbt_to_b64(tmpctx, ictx.desired_psbt));
 
 	char *error = process_interactivetx_updates(&ictx);
 
 	if(error) {
 
+		DLOG(error);
 		peer_failed_err(peer->pps, &peer->channel_id,
 				"Interactive splicing error: %s", error);
 	}
+
+	//TODO: Calculate feerate correctly
+
+	// u32 ourFeerate = channel_feerate(peer->channel, LOCAL);
+	// u32 theirFeerate = channel_feerate(peer->channel, REMOTE);
+
+	// this version of splicing, only we are responsible for the fees
+	// (void)theirFeerate;
+
+	// commit_tx_base_fee( <-- dont think this is the one to use
+
+	struct wally_tx_output *newChanOutpoint = &ictx.current_psbt->tx->outputs[0];
+
+	newChanOutpoint->satoshi = peer->channel->funding_sats.satoshis - 500;
+
+	psbt_elements_normalize_fees(ictx.current_psbt);
+
+	struct bitcoin_tx *bitcoin_tx = bitcoin_tx_with_psbt(tmpctx, ictx.current_psbt);
+
+	msg = towire_hsmd_sign_commitment_tx(tmpctx,
+					     &peer->node_ids[REMOTE],
+					     peer->channel->dbid,
+					     bitcoin_tx,
+					     &peer->channel->funding_pubkey[REMOTE]);
+
+	msg = hsm_req(tmpctx, take(msg));
+	if (!fromwire_hsmd_sign_tx_reply(msg, &commit_sig))
+		status_failed(STATUS_FAIL_HSM_IO,
+			      "Reading sign_remote_commitment_tx reply: %s",
+			      tal_hex(tmpctx, msg));
+
+	// pass to peer with towire_commitment_signed
+
+	// get from peer with fromwire_commitment_signed
+	
+	// add signatures to PSBT
+
+	DLOG("handle_peer_splice_ack success!");
+
+	DLOG(psbt_to_b64(tmpctx, ictx.current_psbt));
 }
 
 static void handle_splice_stfu_success(struct peer *peer)
@@ -2276,6 +2398,8 @@ static void handle_splice_stfu_success(struct peer *peer)
 
 	msg = towire_channeld_splice_confirmed_init(NULL);
 	wire_sync_write(MASTER_FD, take(msg));
+
+	DLOG("Sending splice message!!!");
 
 	msg = towire_splice(NULL, &peer->channel_id);
 	peer_write(peer->pps, take(msg));
