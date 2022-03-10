@@ -1716,7 +1716,7 @@ static u8 *accepter_commits(struct state *state,
 	struct amount_msat our_msats;
 	struct channel_id cid;
 	const u8 *wscript;
-	u8 *msg;
+	u8 *msg, *commit_msg;
 	char *error;
 	const struct channel_type *type;
 
@@ -1758,9 +1758,18 @@ static u8 *accepter_commits(struct state *state,
 	}
 
 	remote_sig.sighash_type = SIGHASH_ALL;
+
+#if EXPERIMENTAL_FEATURES
+	struct tlv_commitment_signed_tlvs *cs_tlv
+		= tlv_commitment_signed_tlvs_new(tmpctx);
+	if (!fromwire_commitment_signed(tmpctx, msg, &cid,
+					&remote_sig.s,
+					&htlc_sigs, cs_tlv))
+#else
 	if (!fromwire_commitment_signed(tmpctx, msg, &cid,
 					&remote_sig.s,
 					&htlc_sigs))
+#endif /* EXPERIMENTAL_FEATURES */
 		open_err_fatal(state, "Parsing commitment signed %s",
 			       tal_hex(tmpctx, msg));
 
@@ -1950,10 +1959,16 @@ static u8 *accepter_commits(struct state *state,
 		master_badmsg(WIRE_DUALOPEND_SEND_TX_SIGS, msg);
 
 	/* Send our commitment sigs over now */
-	peer_write(state->pps,
-		   take(towire_commitment_signed(NULL,
-						 &state->channel_id,
-						 &local_sig.s, NULL)));
+#if EXPERIMENTAL_FEATURES
+	commit_msg = towire_commitment_signed(NULL, &state->channel_id,
+					      &local_sig.s, NULL, NULL);
+#else
+	commit_msg = towire_commitment_signed(NULL, &state->channel_id,
+					      &local_sig.s, NULL);
+#endif /* EXPERIMENTAL_FEATURES */
+
+	peer_write(state->pps, take(commit_msg));
+
 	return msg;
 }
 
@@ -2504,9 +2519,15 @@ static u8 *opener_commits(struct state *state,
 				    &state->our_funding_pubkey));
 
 	assert(local_sig.sighash_type == SIGHASH_ALL);
+#if EXPERIMENTAL_FEATURES
+	msg = towire_commitment_signed(tmpctx, &state->channel_id,
+				       &local_sig.s,
+				       NULL, NULL);
+#else
 	msg = towire_commitment_signed(tmpctx, &state->channel_id,
 				       &local_sig.s,
 				       NULL);
+#endif /* EXPERIMENTAL_FEATURES */
 	peer_write(state->pps, msg);
 	peer_billboard(false, "channel open: commitment sent, waiting for reply");
 
@@ -2519,9 +2540,18 @@ static u8 *opener_commits(struct state *state,
 	}
 
 	remote_sig.sighash_type = SIGHASH_ALL;
+
+#if EXPERIMENTAL_FEATURES
+	struct tlv_commitment_signed_tlvs *cs_tlv
+		= tlv_commitment_signed_tlvs_new(tmpctx);
+	if (!fromwire_commitment_signed(tmpctx, msg, &cid,
+					&remote_sig.s,
+					&htlc_sigs, cs_tlv))
+#else
 	if (!fromwire_commitment_signed(tmpctx, msg, &cid,
 					&remote_sig.s,
 					&htlc_sigs))
+#endif /* EXPERIMENTAL_FEATURES */
 		open_err_fatal(state, "Parsing commitment signed %s",
 			       tal_hex(tmpctx, msg));
 

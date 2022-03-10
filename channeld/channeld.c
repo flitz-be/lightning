@@ -1368,9 +1368,16 @@ static void send_commit(struct peer *peer)
 
 	peer->next_index[REMOTE]++;
 
+#if EXPERIMENTAL_FEATURES
+	msg = towire_commitment_signed(NULL, &peer->channel_id,
+				       &commit_sig.s,
+				       raw_sigs(tmpctx, htlc_sigs),
+				       NULL);
+#else
 	msg = towire_commitment_signed(NULL, &peer->channel_id,
 				       &commit_sig.s,
 				       raw_sigs(tmpctx, htlc_sigs));
+#endif /* EXPERIMENTAL_FEATURES */
 	peer_write(peer->pps, take(msg));
 
 	maybe_send_shutdown(peer);
@@ -1580,8 +1587,15 @@ static void handle_peer_commit_sig(struct peer *peer, const u8 *msg)
 								 LOCAL)));
 	}
 
+#if EXPERIMENTAL_FEATURES
+	struct tlv_commitment_signed_tlvs *cs_tlv
+		= tlv_commitment_signed_tlvs_new(tmpctx);
+	if (!fromwire_commitment_signed(tmpctx, msg,
+					&channel_id, &commit_sig.s, &raw_sigs, cs_tlv))
+#else
 	if (!fromwire_commitment_signed(tmpctx, msg,
 					&channel_id, &commit_sig.s, &raw_sigs))
+#endif /* EXPERIMENTAL_FEATURES */
 		peer_failed_warn(peer->pps, &peer->channel_id,
 				 "Bad commit_sig %s", tal_hex(msg, msg));
 	/* SIGHASH_ALL is implied. */
@@ -2570,9 +2584,16 @@ static void resend_commitment(struct peer *peer, struct changed_htlc *last)
 
 	htlc_sigs = calc_commitsigs(tmpctx, peer, txs, funding_wscript, htlc_map, peer->next_index[REMOTE]-1,
 				    &commit_sig);
+#if EXPERIMENTAL_FEATURES
+	msg = towire_commitment_signed(NULL, &peer->channel_id,
+				       &commit_sig.s,
+				       raw_sigs(tmpctx, htlc_sigs),
+				       NULL);
+#else
 	msg = towire_commitment_signed(NULL, &peer->channel_id,
 				       &commit_sig.s,
 				       raw_sigs(tmpctx, htlc_sigs));
+#endif
 	peer_write(peer->pps, take(msg));
 
 	/* If we have already received the revocation for the previous, the
