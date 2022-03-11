@@ -1104,6 +1104,9 @@ static struct command_result *json_splice_init(struct command *cmd,
 	cc->cmd = cmd;
 	cc->channel = channel;
 
+	assert(channel);
+	assert(channel->owner);
+
 	msg = towire_channeld_splice_init(NULL);
 
 	subd_send_msg(channel->owner, take(msg)); // <-- crash here. 
