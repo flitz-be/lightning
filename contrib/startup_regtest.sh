@@ -165,14 +165,20 @@ fund_ln() {
 		node2="$2"
 	fi
 
-	ADDRESS=`bitcoin-cli -regtest getnewaddress`
+	if [ -z "$3" ]; then
+		WALLET="-rpcwallet=default"
+	else
+		WALLET="-rpcwallet=$3"
+	fi
+
+	ADDRESS=`bitcoin-cli "$WALLET" -regtest getnewaddress`
 
 	echo "minning into address " $ADDRESS
 
 	bitcoin-cli -regtest generatetoaddress 125 $ADDRESS
 
 	echo "Mined into $ADDRESS, checking balance"
-	bitcoin-cli -regtest getbalance
+	bitcoin-cli -regtest "$WALLET" getbalance
 
 	L2_NODE_ID=`$LCLI --lightning-dir=/tmp/l$node2-regtest getinfo | jq -r .id`
 	L2_NODE_PORT=`$LCLI --lightning-dir=/tmp/l$node2-regtest getinfo | jq .binding[0].port`
@@ -185,9 +191,9 @@ fund_ln() {
 
 	L1_WALLET_ADDR=`$LCLI --lightning-dir=/tmp/l$node1-regtest newaddr | jq -r .bech32`
 
-	echo bitcoin-cli -regtest sendtoaddress $L1_WALLET_ADDR 1000
+	echo bitcoin-cli -regtest "$WALLET" sendtoaddress $L1_WALLET_ADDR 1000
 
-	bitcoin-cli -regtest sendtoaddress $L1_WALLET_ADDR 1000
+	bitcoin-cli -regtest "$WALLET" sendtoaddress $L1_WALLET_ADDR 1000
 
 	bitcoin-cli -regtest generatetoaddress 24 $ADDRESS
 
