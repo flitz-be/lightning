@@ -197,6 +197,8 @@ fund_ln() {
 
 	bitcoin-cli -regtest generatetoaddress 24 $ADDRESS
 
+	sleep 6
+
 	CHANNEL_RESULT=`$LCLI --lightning-dir=/tmp/l$node1-regtest fundchannel $L2_NODE_ID 1000000`
 
 	echo $CHANNEL_RESULT
