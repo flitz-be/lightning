@@ -175,7 +175,7 @@ fund_ln() {
 
 	echo "minning into address " $ADDRESS
 
-	bitcoin-cli -regtest generatetoaddress 125 $ADDRESS
+	bitcoin-cli -regtest generatetoaddress 125 $ADDRESS > \dev\null
 
 	echo "Mined into $ADDRESS, checking balance"
 	bitcoin-cli -regtest "$WALLET" getbalance
@@ -195,7 +195,7 @@ fund_ln() {
 
 	bitcoin-cli -regtest "$WALLET" sendtoaddress $L1_WALLET_ADDR 1000
 
-	bitcoin-cli -regtest generatetoaddress 24 $ADDRESS
+	bitcoin-cli -regtest generatetoaddress 24 $ADDRESS > /dev/null
 
 	sleep 6
 
@@ -207,7 +207,7 @@ fund_ln() {
 
 	echo channel id is: $L_CHANNEL_ID
 
-	bitcoin-cli -regtest generatetoaddress 12 $ADDRESS
+	bitcoin-cli -regtest generatetoaddress 12 $ADDRESS > /dev/null
 
 	sleep 6
 
