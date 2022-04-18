@@ -2801,7 +2801,8 @@ static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 						  &ictx.current_psbt->inputs[0]);
 
 	if(!psbt_finalize(ictx.current_psbt))
-		DLOG("Splice psbt_finalize failed");
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "Splice psbt_finalize failed");
 
 	struct bitcoin_tx *final_tx = bitcoin_tx_with_psbt(tmpctx, ictx.current_psbt);
 
