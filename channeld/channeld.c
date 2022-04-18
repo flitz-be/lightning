@@ -2242,7 +2242,6 @@ static struct wally_psbt *next_splice_step(struct interactivetx_context *ictx)
 	/* Accepter accepts everything for now. */
 	if(ictx->our_role == TX_ACCEPTER) {
 
-		DLOG("Accepter is returning NULL");
 		return NULL;
 	}
 
@@ -2254,7 +2253,11 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 	u8 *msg;
 	struct interactivetx_context ictx;
 
-	msg = towire_splice_ack(NULL, &peer->channel_id);
+	msg = towire_splice_ack(tmpctx,
+				&chainparams->genesis_blockhash,
+				&peer->channel_id,
+				&peer->channel->funding_pubkey[LOCAL]);
+
 	peer_write(peer->pps, take(msg));
 
 	/* Now we wait for the other side to go first.
@@ -2375,7 +2378,11 @@ static void handle_splice_stfu_success(struct peer *peer)
 	msg = towire_channeld_splice_confirmed_init(NULL);
 	wire_sync_write(MASTER_FD, take(msg));
 
-	msg = towire_splice(NULL, &peer->channel_id);
+	msg = towire_splice(tmpctx,
+			    &chainparams->genesis_blockhash,
+			    &peer->channel_id,
+			    0,
+			    &peer->channel->funding_pubkey[LOCAL]);
 	peer_write(peer->pps, take(msg));
 }
 
