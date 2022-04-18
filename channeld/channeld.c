@@ -29,6 +29,7 @@
 #include <common/msg_queue.h>
 #include <common/onionreply.h>
 #include <common/psbt_open.h>
+#include <common/psbt_internal.h>
 #include <common/peer_billboard.h>
 #include <common/peer_failed.h>
 #include <common/peer_io.h>
