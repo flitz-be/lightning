@@ -1144,7 +1144,7 @@ static int change_htlcs(struct channel *channel,
 				   ^ htlc_state_flags(htlc_states[i]+1));
 	}
 
-	return commit_all ?: cflags;
+	return commit_all ? 0 : cflags;
 }
 
 /* FIXME: The sender's requirements are *implied* by this, not stated! */

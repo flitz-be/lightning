@@ -2451,8 +2451,6 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 
 	if(type != WIRE_COMMITMENT_SIGNED) {
 
-		DLOG("Spilcing got incorrect message from peer (should be WIRE_COMMITMENT_SIGNED");
-
 		peer_failed_warn(peer->pps, &peer->channel_id,
 				"Splicing got incorrect message from peer: %d "
 				"(should be WIRE_COMMITMENT_SIGNED)", type);
@@ -2468,8 +2466,6 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 		return;
 
 	if(type != WIRE_TX_SIGNATURES) {
-
-		DLOG("Splicing got incorrect message from peer (should be WIRE_TX_SIGNATURES)");
 
 		peer_failed_warn(peer->pps, &peer->channel_id,
 				"Splicing got incorrect message from peer: %d "
@@ -2502,8 +2498,7 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 			      "Reading sign_splice_tx reply: %s",
 			      tal_hex(tmpctx, msg));
 
-	status_debug("Creating splice signature %"PRIu64" %s for tx %s key %s",
-		     0ull,
+	status_debug("Creating splice signature %s for tx %s key %s",
 		     type_to_string(tmpctx, struct bitcoin_signature,
 				    &splice_sig),
 		     type_to_string(tmpctx, struct bitcoin_tx, bitcoin_tx),
@@ -2522,8 +2517,6 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 	psbt_finalize(ictx.current_psbt);
 
 	ws = tal_arr(tmpctx, struct witness_stack *, 1);
-
-	tal_count(ws);
 
 	ws[0] = tal(tmpctx, struct witness_stack);
 
@@ -2547,9 +2540,6 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 
 	peer_write(peer->pps, take(msg));
 
-	int final_sigs_cnt =
-		psbt_finalize_multisig_signatures(tmpctx,
-						  &ictx.current_psbt->inputs[0]);
 }
 
 static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
@@ -2686,8 +2676,7 @@ static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 			      "Reading sign_splice_tx reply: %s",
 			      tal_hex(tmpctx, msg));
 
-	status_debug("Creating splice signature %"PRIu64" %s for tx %s redeemscript %s key %s",
-		     0ull,
+	status_debug("Creating splice signature %s for tx %s redeemscript %s key %s",
 		     type_to_string(tmpctx, struct bitcoin_signature,
 				    &splice_sig),
 		     type_to_string(tmpctx, struct bitcoin_tx, bitcoin_tx),
@@ -2707,8 +2696,6 @@ static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 	psbt_finalize(ictx.current_psbt);
 
 	struct witness_stack **ws = tal_arr(tmpctx, struct witness_stack *, 1);
-
-	tal_count(ws);
 
 	ws[0] = tal(tmpctx, struct witness_stack);
 
