@@ -226,6 +226,16 @@ bool channel_sending_commit(struct channel *channel,
 			    const struct htlc ***htlcs);
 
 /**
+ * channel_sending_commit_all: (re)commit all remote changes.
+ * @channel: the channel
+ * @htlcs: initially-empty tal_arr() for htlcs which changed state.
+ *
+ * This is where we commit to pending changes we've added; returns true if
+ * anything changed for the remote side (if not, don't send!) */
+bool channel_sending_commit_all(struct channel *channel,
+                                const struct htlc ***htlcs);
+
+/**
  * channel_rcvd_revoke_and_ack: accept ack on remote committed changes.
  * @channel: the channel
  * @htlcs: initially-empty tal_arr() for htlcs which changed state.

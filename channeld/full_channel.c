@@ -1086,7 +1086,8 @@ static int change_htlcs(struct channel *channel,
 			const enum htlc_state *htlc_states,
 			size_t n_hstates,
 			const struct htlc ***htlcs,
-			const char *prefix)
+			const char *prefix,
+			bool commit_all)
 {
 	struct htlc_map_iter it;
 	struct htlc *h;
@@ -1101,7 +1102,7 @@ static int change_htlcs(struct channel *channel,
 	     h;
 	     h = htlc_map_next(channel->htlcs, &it)) {
 		for (i = 0; i < n_hstates; i++) {
-			if (h->state == htlc_states[i]) {
+			if (h->state == htlc_states[i] || commit_all) {
 				htlc_incstate(channel, h, sidechanged, owed);
 				dump_htlc(h, prefix);
 				htlc_arr_append(htlcs, h);
@@ -1135,7 +1136,7 @@ static int change_htlcs(struct channel *channel,
 				   ^ htlc_state_flags(htlc_states[i]+1));
 	}
 
-	return cflags;
+	return commit_all ?: cflags;
 }
 
 /* FIXME: The sender's requirements are *implied* by this, not stated! */
@@ -1326,7 +1327,25 @@ bool channel_sending_commit(struct channel *channel,
 	status_debug("Trying commit");
 
 	change = change_htlcs(channel, REMOTE, states, ARRAY_SIZE(states),
-			      htlcs, "sending_commit");
+			      htlcs, "sending_commit", false);
+	if (!change)
+		return false;
+
+	return true;
+}
+
+bool channel_sending_commit_all(struct channel *channel,
+			    const struct htlc ***htlcs)
+{
+	int change;
+	const enum htlc_state states[] = { SENT_ADD_HTLC,
+					   SENT_REMOVE_REVOCATION,
+					   SENT_ADD_REVOCATION,
+					   SENT_REMOVE_HTLC };
+	status_debug("Trying commit");
+
+	change = change_htlcs(channel, REMOTE, states, ARRAY_SIZE(states),
+			      htlcs, "sending_commit", true);
 	if (!change)
 		return false;
 
@@ -1344,7 +1363,7 @@ bool channel_rcvd_revoke_and_ack(struct channel *channel,
 
 	status_debug("Received revoke_and_ack");
 	change = change_htlcs(channel, LOCAL, states, ARRAY_SIZE(states),
-			      htlcs, "rcvd_revoke_and_ack");
+			      htlcs, "rcvd_revoke_and_ack", false);
 
 	/* Their ack can queue changes on our side. */
 	return (change & HTLC_LOCAL_F_PENDING);
@@ -1361,7 +1380,7 @@ bool channel_rcvd_commit(struct channel *channel, const struct htlc ***htlcs)
 
 	status_debug("Received commit");
 	change = change_htlcs(channel, LOCAL, states, ARRAY_SIZE(states),
-			      htlcs, "rcvd_commit");
+			      htlcs, "rcvd_commit", false);
 	if (!change)
 		return false;
 	return true;
@@ -1376,7 +1395,7 @@ bool channel_sending_revoke_and_ack(struct channel *channel)
 					   RCVD_REMOVE_ACK_COMMIT };
 	status_debug("Sending revoke_and_ack");
 	change = change_htlcs(channel, REMOTE, states, ARRAY_SIZE(states), NULL,
-			      "sending_revoke_and_ack");
+			      "sending_revoke_and_ack", false);
 
 	/* Our ack can queue changes on their side. */
 	return (change & HTLC_REMOTE_F_PENDING);
