@@ -34,11 +34,11 @@ void psbt_finalize_input(const tal_t *ctx,
 	 * scriptsig check -- if there's a redeemscript field still around we
 	 * just go ahead and mush it into the final_scriptsig field. */
 	if (in->redeem_script) {
-		u8 *redeemscript = tal_dup_arr(NULL, u8,
+		u8 *redeemscript = tal_dup_arr(ctx, u8,
 					       in->redeem_script,
 					       in->redeem_script_len, 0);
 		in->final_scriptsig =
-			bitcoin_scriptsig_redeem(NULL,
+			bitcoin_scriptsig_redeem(ctx,
 						 take(redeemscript));
 		in->final_scriptsig_len =
 			tal_bytelen(in->final_scriptsig);
@@ -121,19 +121,23 @@ int psbt_finalize_multisig_signatures(const tal_t *ctx,
 
 	for(int i = 0; i < in->signatures.num_items; i++) {
 
+		u8 der[EC_SIGNATURE_DER_MAX_LEN + 1];
 		struct wally_map_item *item = &in->signatures.items[i];
+		unsigned char *value = item->value;
+		size_t value_len = item->value_len;
 
-		size_t pubkey_index = index_of_pubkey_in_multisig(item->key,
-								  item->key_len,
-								  in->witness_script,
-								  in->witness_script_len);
+		size_t pubkey_index =
+			index_of_pubkey_in_multisig(item->key,
+						    item->key_len,
+						    in->witness_script,
+						    in->witness_script_len);
 
 		/* If the public key is not found in the witness script, skip */
 
 		if(pubkey_index == SIZE_MAX)
 			continue;
 
-		/* Because the first signature is always and empty one, we move
+		/* Because the first signature is always an empty one, we move
 		 * the real signatures over by one */
 
 		pubkey_index++;
@@ -144,6 +148,26 @@ int psbt_finalize_multisig_signatures(const tal_t *ctx,
 		 */
 		result++;
 
+		/* If the signature is not DER encoded, let's encode it */
+
+		if(item->value_len == sizeof(secp256k1_ecdsa_signature)) {
+
+			secp256k1_ecdsa_signature *sig;
+
+			sig = (secp256k1_ecdsa_signature *)item->value;
+
+			size_t der_len = sizeof(der);
+
+			secp256k1_ecdsa_signature_serialize_der(secp256k1_ctx,
+								der, &der_len, sig);
+
+			/* Append sighash type */
+			der[der_len++] = SIGHASH_ALL;
+
+			value = der;
+			value_len = der_len;
+		}
+
 		/* Search through witness stack to see if the signature is
 		 * already present */
 
@@ -151,12 +175,15 @@ int psbt_finalize_multisig_signatures(const tal_t *ctx,
 
 		for(int j = 0; j < in->final_witness->num_items; j++) {
 
-			struct wally_tx_witness_item *cmp_item = &in->final_witness->items[j];
+			struct wally_tx_witness_item *cmp_item =
+				&in->final_witness->items[j];
 
-			if(item->value_len != cmp_item->witness_len)
+			if(value_len != cmp_item->witness_len)
 				continue;
 
-			if(0 == memcmp(item->value, cmp_item->witness, item->value_len))
+			if(0 == memcmp(value,
+				       cmp_item->witness,
+				       value_len))
 				is_already_present = true;
 		}
 
@@ -175,44 +202,29 @@ int psbt_finalize_multisig_signatures(const tal_t *ctx,
 					   in->witness_script,
 					   in->witness_script_len);
 
-		int i = in->final_witness->num_items - 1;
+		int index = in->final_witness->num_items - 1;
 
 		do {
 
 			struct wally_tx_witness_item *lower_item =
-				&in->final_witness->items[i - 1];
+				&in->final_witness->items[index - 1];
 
 			wally_tx_witness_stack_set(in->final_witness,
-						   i,
+						   index,
 						   lower_item->witness,
 						   lower_item->witness_len);
 
-			i--;
+			index--;
 
-		} while(i > pubkey_index);
+		} while(index > pubkey_index);
 
-		secp256k1_ecdsa_signature *sig;
-
-		sig = (secp256k1_ecdsa_signature *)item->value;
-
-		secp256k1_ecdsa_signature_normalize(secp256k1_ctx, sig, sig);
-
-		//TODO assert(item->value_len == sizeof(*sig))
-
-		u8 der[73];
-
-		size_t der_len = 72;
-
-		secp256k1_ecdsa_signature_serialize_der(secp256k1_ctx,
-							der, &der_len, sig);
-
-		/* Append sighash type */
-		der[der_len++] = SIGHASH_ALL;
+		/* index is now the appropriate spot in the stack to add the
+		 * sig, so let's add it there */
 
 		wally_tx_witness_stack_set(in->final_witness,
-					   i,
-					   der,
-					   der_len);
+					   index,
+					   value,
+					   value_len);
 	}
 
 	tal_wally_end(ctx);
