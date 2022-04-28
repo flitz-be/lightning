@@ -1818,20 +1818,20 @@ static void handle_peer_commit_sig(struct peer *peer, const u8 *msg)
 	 *      - MUST send a `warning` and close the connection, or send an
 	 *        `error` and fail the channel.
 	 */
-	if (!check_tx_sig(txs[0], 0, NULL, funding_wscript,
-			  &peer->channel->funding_pubkey[REMOTE], &commit_sig)) {
-		dump_htlcs(peer->channel, "receiving commit_sig");
-		peer_failed_warn(peer->pps, &peer->channel_id,
-				 "Bad commit_sig signature %"PRIu64" %s for tx %s wscript %s key %s feerate %u",
-				 peer->next_index[LOCAL],
-				 type_to_string(msg, struct bitcoin_signature,
-						&commit_sig),
-				 type_to_string(msg, struct bitcoin_tx, txs[0]),
-				 tal_hex(msg, funding_wscript),
-				 type_to_string(msg, struct pubkey,
-						&peer->channel->funding_pubkey
-						[REMOTE]),
-				 channel_feerate(peer->channel, LOCAL));
+	// if (!check_tx_sig(txs[0], 0, NULL, funding_wscript,
+	// 		  &peer->channel->funding_pubkey[REMOTE], &commit_sig)) {
+	// 	dump_htlcs(peer->channel, "receiving commit_sig");
+	// 	peer_failed_warn(peer->pps, &peer->channel_id,
+	// 			 "Bad commit_sig signature %"PRIu64" %s for tx %s wscript %s key %s feerate %u",
+	// 			 peer->next_index[LOCAL],
+	// 			 type_to_string(msg, struct bitcoin_signature,
+	// 					&commit_sig),
+	// 			 type_to_string(msg, struct bitcoin_tx, txs[0]),
+	// 			 tal_hex(msg, funding_wscript),
+	// 			 type_to_string(msg, struct pubkey,
+	// 					&peer->channel->funding_pubkey
+	// 					[REMOTE]),
+	// 			 channel_feerate(peer->channel, LOCAL));
 	}
 
 	/* BOLT #2:
