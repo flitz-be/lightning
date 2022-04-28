@@ -217,7 +217,7 @@ static char *send_next(struct interactivetx_context *ictx, bool *finished)
 
 		const struct input_set *in = &set->added_ins[0];
 		// struct wally_psbt_input *localin;
-		struct amount_sat sats;
+		// struct amount_sat sats;
 		// u8 *outpointScript;
 		u8 *wit_script;
 		u8 *prevtx;
@@ -246,16 +246,12 @@ static char *send_next(struct interactivetx_context *ictx, bool *finished)
 		// 	}
 		// }
 
-		sats.satoshis = in->input.witness_utxo->satoshi;
+		// sats.satoshis = in->input.witness_utxo->satoshi;
 		// outpointScript = tal_dup_arr(NULL,
 		// 			     u8,
 		// 			     in->input.witness_utxo->script,
 		// 			     in->input.witness_utxo->script_len,
 		// 			     0);
-
-		char buf[1024];
-
-		sprintf(buf, "Adding input with %lld sats", sats.satoshis);
 
 		if(in->input.utxo) {
 
