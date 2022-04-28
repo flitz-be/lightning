@@ -2760,6 +2760,8 @@ static void handle_psbt_changed(struct subd *dualopend,
 	abort();
 }
 
+// TODO: splitting into a one time event
+// and multiple sig updates over time
 static void handle_commit_received(struct subd *dualopend,
 				   struct channel *channel,
 				   const u8 *msg)

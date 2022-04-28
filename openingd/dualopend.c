@@ -2494,6 +2494,10 @@ static u8 *opener_commits(struct state *state,
 	}
 
 
+	// TODO: Copy the below procedure for splicing
+	// We probably need to do this in response to commitment_signed message
+	// and / or in the revoke_and_ack code
+
 	/* We ask the HSM to sign their commitment transaction for us: it knows
 	 * our funding key, it just needs the remote funding key to create the
 	 * witness script.  It also needs the amount of the funding output,

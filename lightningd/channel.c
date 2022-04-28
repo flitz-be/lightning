@@ -177,6 +177,13 @@ new_inflight(struct channel *channel,
 	/* Make a 'clone' of this tx */
 	last_tx_psbt_clone = clone_psbt(inflight, last_tx->psbt);
 	inflight->last_tx = bitcoin_tx_with_psbt(inflight, last_tx_psbt_clone);
+	// if(last_tx) {
+	// 	last_tx_psbt_clone = clone_psbt(inflight, last_tx->psbt);
+	// 	inflight->last_tx = bitcoin_tx_with_psbt(inflight, last_tx_psbt_clone);
+	// }
+	// else {
+	// 	inflight->last_tx = NULL;
+	// }
 	inflight->last_sig = last_sig;
 	inflight->tx_broadcast = false;
 

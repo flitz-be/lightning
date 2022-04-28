@@ -134,8 +134,11 @@ start_ln() {
 	# Kick it out of initialblockdownload if necessary
 	if bitcoin-cli -regtest getblockchaininfo | grep -q 'initialblockdownload.*true'; then
 		# Modern bitcoind needs createwallet
+		echo "Making \"default\" bitcoind wallet."
 		bitcoin-cli -regtest createwallet default >/dev/null 2>&1
 		bitcoin-cli -regtest generatetoaddress 1 "$(bitcoin-cli -regtest getnewaddress)" > /dev/null
+	else
+		bitcoin-cli -regtest loadwallet default
 	fi
 	alias bt-cli='bitcoin-cli -regtest'
 
@@ -145,7 +148,71 @@ start_ln() {
 		nodes="$1"
 	fi
 	start_nodes "$nodes" regtest
-	echo "	bt-cli, stop_ln"
+	echo "	bt-cli, stop_ln, fund_ln"
+}
+
+fund_ln() {
+
+	if [ -z "$1" ]; then
+		node1=1
+	else
+		node1="$1"
+	fi
+
+	if [ -z "$2" ]; then
+		node2=2
+	else
+		node2="$2"
+	fi
+
+	if [ -z "$3" ]; then
+		WALLET="-rpcwallet=default"
+	else
+		WALLET="-rpcwallet=$3"
+	fi
+
+	ADDRESS=$(bitcoin-cli "$WALLET" -regtest getnewaddress)
+
+	echo "minning into address $ADDRESS"
+
+	bitcoin-cli -regtest generatetoaddress 125 "$ADDRESS" > "\dev\null"
+
+	echo "Mined into $ADDRESS, checking balance"
+	bitcoin-cli -regtest "$WALLET" getbalance
+
+	L2_NODE_ID=$($LCLI --lightning-dir=/tmp/l$node2-regtest getinfo | jq -r .id)
+	L2_NODE_PORT=$($LCLI --lightning-dir=/tmp/l$node2-regtest getinfo | jq .binding[0].port)
+
+	echo "Node 2 id/port is : $L2_NODE_ID:$L2_NODE_PORT"
+
+	$LCLI --lightning-dir=/tmp/l$node1-regtest connect "$L2_NODE_ID@localhost:$L2_NODE_PORT"
+
+	$LCLI --lightning-dir=/tmp/l$node1-regtest listpeers
+
+	L1_WALLET_ADDR=$($LCLI "--lightning-dir=/tmp/l$node1-regtest" newaddr | jq -r .bech32)
+
+	echo bitcoin-cli -regtest "$WALLET" sendtoaddress "$L1_WALLET_ADDR" 1000
+
+	bitcoin-cli -regtest "$WALLET" sendtoaddress "$L1_WALLET_ADDR" 1000
+
+	bitcoin-cli -regtest generatetoaddress 24 "$ADDRESS" > /dev/null
+
+	sleep 6
+
+	CHANNEL_RESULT=$($LCLI --lightning-dir=/tmp/l$node1-regtest fundchannel $L2_NODE_ID 1000000)
+
+	echo "$CHANNEL_RESULT"
+
+	L_CHANNEL_ID=$(echo "$CHANNEL_RESULT" | jq -r .channel_id)
+
+	echo channel id is: "$L_CHANNEL_ID"
+
+	bitcoin-cli -regtest generatetoaddress 12 "$ADDRESS" > /dev/null
+
+	sleep 6
+
+	$LCLI "--lightning-dir=/tmp/l$node1-regtest" listchannels
+	$LCLI "--lightning-dir=/tmp/l$node2-regtest" listchannels
 }
 
 stop_nodes() {

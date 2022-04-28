@@ -50,13 +50,27 @@ struct interactivetx_context {
 	 * used inside 'next_update'.
 	 */
 	struct wally_psbt *desired_psbt;
+
+	/* If true, process_interactivetx_updates will return when local changes
+	 * are exhausted and 'tx_complete' will not be sent.
+	 */
+	bool pause_when_complete;
+
+	/* Internal cached change set */
+	struct psbt_changeset *change_set;
 };
 
-/* Blocks the thread until both peers are happy with the state of the
- * transaction or some kind of error / validation failure occurs.
+/* Blocks the thread until
+ * 1) both peers are happy with the state of the transaction,
+ * 2) we've run out of local changes and 'pause_when_complete' is true, or
+ * 3) some kind of error / validation failure occurs.
+ * 
+ * If received_tx_complete is not NULL:
+ * in -> true means we already received tx_complete in a previous round.
+ * out -> true means the last message from the peer was 'tx_complete'.
  * 
  * Returns NULL on success or a description of the error on failure.
  */
-char *process_interactivetx_updates(struct interactivetx_context *ictx);
+char *process_interactivetx_updates(struct interactivetx_context *ictx, bool *received_tx_complete);
 
 #endif /* LIGHTNING_INTERACTIVETX_INTERACTIVETX_H */
