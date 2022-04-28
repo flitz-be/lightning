@@ -34,7 +34,7 @@ void psbt_finalize_input(const tal_t *ctx,
  * @in - input to set final_witness for
  * 
  * Returns the number of signatures that were recognized as correct
- * for the witness script.
+ * for the witness script (whether they were already present or not).
  */
 int psbt_finalize_multisig_signatures(const tal_t *ctx,
 				       struct wally_psbt_input *in);
