@@ -1328,9 +1328,9 @@ static void send_commit(struct peer *peer)
 	struct tlv_commitment_signed_tlvs *cs_tlv
 		= tlv_commitment_signed_tlvs_new(tmpctx);
 
-	cs_tlv->splice_commitsigs = tal_arrz(tmpctx,
-					     struct commitsigs *,
-					     0);
+	// cs_tlv->splice_commitsigs = tal_arrz(tmpctx,
+	// 				     struct commitsigs *,
+	// 				     0);
 
 	/* Loop over current inflights
 	 * BOLT #2:
@@ -1338,96 +1338,96 @@ static void send_commit(struct peer *peer)
 	 *
 	 * TODO: Sort updates by increasing feerate order
 	 */
-	for(u32 i = 0; ; i++) {
+	// for(u32 i = 0; ; i++) {
 
-		// TODO: Synchronously sending & receiving inflight data is problematic.
-		break;
+	// 	// TODO: Synchronously sending & receiving inflight data is problematic.
+	// 	break;
 
-		u8 *msg;
-		bool is_found;
-		struct bitcoin_outpoint outpoint;
-		u32 theirFeerate;
-		struct amount_sat funding_sats, our_funding_sats;
-		struct wally_psbt *psbt;
+	// 	u8 *msg;
+	// 	bool is_found;
+	// 	struct bitcoin_outpoint outpoint;
+	// 	u32 theirFeerate;
+	// 	struct amount_sat funding_sats, our_funding_sats;
+	// 	struct wally_psbt *psbt;
 
-		wire_sync_write(MASTER_FD,
-			        take(towire_channeld_get_inflight(tmpctx,
-							          i)));
+	// 	wire_sync_write(MASTER_FD,
+	// 		        take(towire_channeld_get_inflight(tmpctx,
+	// 						          i)));
 
-		assert(!(fcntl(MASTER_FD, F_GETFL) & O_NONBLOCK));
+	// 	assert(!(fcntl(MASTER_FD, F_GETFL) & O_NONBLOCK));
 
-		msg = wire_sync_read(tmpctx, MASTER_FD);
-		if (!fromwire_channeld_got_inflight(tmpctx,
-						    msg,
-						    &is_found,
-						    &outpoint.txid,
-						    &outpoint.n,
-						    &theirFeerate,
-						    &funding_sats,
-						    &our_funding_sats,
-						    &psbt)) {
+	// 	msg = wire_sync_read(tmpctx, MASTER_FD);
+	// 	if (!fromwire_channeld_got_inflight(tmpctx,
+	// 					    msg,
+	// 					    &is_found,
+	// 					    &outpoint.txid,
+	// 					    &outpoint.n,
+	// 					    &theirFeerate,
+	// 					    &funding_sats,
+	// 					    &our_funding_sats,
+	// 					    &psbt)) {
 
-			peer_failed_err(peer->pps,
-					&peer->channel_id,
-					"Invalid 'got_inflight' mesage from daemon");
-		}
+	// 		peer_failed_err(peer->pps,
+	// 				&peer->channel_id,
+	// 				"Invalid 'got_inflight' mesage from daemon");
+	// 	}
 
-		if(!is_found)
-			break;
+	// 	if(!is_found)
+	// 		break;
 
-		const struct htlc **all_htlcs;
+	// 	const struct htlc **all_htlcs;
 
-		/* TODO: Update channel_sending_commit(_all) to sign using the new
-		 * splice txid
-		 */
+	// 	/* TODO: Update channel_sending_commit(_all) to sign using the new
+	// 	 * splice txid
+	// 	 */
 
-		all_htlcs = tal_arr(tmpctx, const struct htlc *, 0);
-		if (!channel_sending_commit_all(peer->channel, &all_htlcs)) {
-			status_debug("Splice HTLC commit_all failed,"
-				     " feechange %s (%s)"
-				     " blockheight %s (%s)",
-				     want_fee_update(peer, NULL) ? "wanted": "not wanted",
-				     type_to_string(tmpctx, struct fee_states, peer->channel->fee_states),
-				     want_blockheight_update(peer, NULL) ? "wanted" : "not wanted",
-				     type_to_string(tmpctx, struct height_states, peer->channel->blockheight_states));
+	// 	all_htlcs = tal_arr(tmpctx, const struct htlc *, 0);
+	// 	if (!channel_sending_commit_all(peer->channel, &all_htlcs)) {
+	// 		status_debug("Splice HTLC commit_all failed,"
+	// 			     " feechange %s (%s)"
+	// 			     " blockheight %s (%s)",
+	// 			     want_fee_update(peer, NULL) ? "wanted": "not wanted",
+	// 			     type_to_string(tmpctx, struct fee_states, peer->channel->fee_states),
+	// 			     want_blockheight_update(peer, NULL) ? "wanted" : "not wanted",
+	// 			     type_to_string(tmpctx, struct height_states, peer->channel->blockheight_states));
 
-			/* Covers the case where we've just been told to shutdown. */
-			maybe_send_shutdown(peer);
+	// 		/* Covers the case where we've just been told to shutdown. */
+	// 		maybe_send_shutdown(peer);
 
-			peer->commit_timer = NULL;
-			return;
-		}
+	// 		peer->commit_timer = NULL;
+	// 		return;
+	// 	}
 
-		/* TODO: Ensure this is returning txs for the given splice txid */
+	// 	/* TODO: Ensure this is returning txs for the given splice txid */
 
-		txs = channel_txs(tmpctx, &htlc_map, direct_outputs,
-				  &funding_wscript, peer->channel, &peer->remote_per_commit,
-				  peer->next_index[REMOTE], REMOTE);
+	// 	txs = channel_txs(tmpctx, &htlc_map, direct_outputs,
+	// 			  &funding_wscript, peer->channel, &peer->remote_per_commit,
+	// 			  peer->next_index[REMOTE], REMOTE);
 
-		txs[0] = bitcoin_tx_with_psbt(tmpctx, psbt);
+	// 	txs[0] = bitcoin_tx_with_psbt(tmpctx, psbt);
 
-		int old_size = tal_count(cs_tlv->splice_commitsigs);
+	// 	int old_size = tal_count(cs_tlv->splice_commitsigs);
 
-		tal_resize(&cs_tlv->splice_commitsigs, old_size + 1);
+	// 	tal_resize(&cs_tlv->splice_commitsigs, old_size + 1);
 
-		cs_tlv->splice_commitsigs[old_size] = tal(tmpctx, struct commitsigs);
+	// 	cs_tlv->splice_commitsigs[old_size] = tal(tmpctx, struct commitsigs);
 
-		htlc_sigs =
-		    calc_commitsigs(tmpctx, peer, txs, funding_wscript, htlc_map,
-				    peer->next_index[REMOTE],
-				    &commit_sig);
+	// 	htlc_sigs =
+	// 	    calc_commitsigs(tmpctx, peer, txs, funding_wscript, htlc_map,
+	// 			    peer->next_index[REMOTE],
+	// 			    &commit_sig);
 
-		struct commitsigs *commitsigs = cs_tlv->splice_commitsigs[old_size];
+	// 	struct commitsigs *commitsigs = cs_tlv->splice_commitsigs[old_size];
 
-	    	commitsigs->commit_signature = commit_sig.s;
+	//     	commitsigs->commit_signature = commit_sig.s;
 
-		commitsigs->htlc_signature = tal_arrz(tmpctx,
-						     secp256k1_ecdsa_signature,
-						     tal_count(htlc_sigs));
+	// 	commitsigs->htlc_signature = tal_arrz(tmpctx,
+	// 					     secp256k1_ecdsa_signature,
+	// 					     tal_count(htlc_sigs));
 
-		for(int i = 0; i < tal_count(htlc_sigs); i++)
-			commitsigs->htlc_signature[i] = htlc_sigs[i].s;
-	}
+	// 	for(int i = 0; i < tal_count(htlc_sigs); i++)
+	// 		commitsigs->htlc_signature[i] = htlc_sigs[i].s;
+	// }
 
 	/* BOLT #2:
 	 *
@@ -1436,7 +1436,7 @@ static void send_commit(struct peer *peer)
 	 *     any updates.
 	 */
 	changed_htlcs = tal_arr(tmpctx, const struct htlc *, 0);
-	if (!peer->resend_all_commitments && !channel_sending_commit(peer->channel, &changed_htlcs)) {
+	if (!channel_sending_commit(peer->channel, &changed_htlcs)) {
 		status_debug("Can't send commit: nothing to send,"
 			     " feechange %s (%s)"
 			     " blockheight %s (%s)",
@@ -1456,7 +1456,7 @@ static void send_commit(struct peer *peer)
 			  &funding_wscript, peer->channel, &peer->remote_per_commit,
 			  peer->next_index[REMOTE], REMOTE);
 
-	peer->resend_all_commitments = false;
+	// peer->resend_all_commitments = false;
 
 	htlc_sigs =
 	    calc_commitsigs(tmpctx, peer, txs, funding_wscript, htlc_map,
