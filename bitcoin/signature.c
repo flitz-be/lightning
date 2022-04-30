@@ -10,6 +10,11 @@
 #include <ccan/mem/mem.h>
 #include <common/type_to_string.h>
 #include <wire/wire.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <unistd.h>
+
+
 
 #undef DEBUG
 #ifdef DEBUG
@@ -67,6 +72,19 @@ static void dump_tx(const char *msg,
 	}
 }
 #else
+
+#define SHA_FMT					   \
+	"%02x%02x%02x%02x%02x%02x%02x%02x"	   \
+	"%02x%02x%02x%02x%02x%02x%02x%02x"	   \
+	"%02x%02x%02x%02x%02x%02x%02x%02x"	   \
+	"%02x%02x%02x%02x%02x%02x%02x%02x"
+
+#define SHA_VALS(e)							\
+	e[0], e[1], e[2], e[3], e[4], e[5], e[6], e[7],			\
+		e[8], e[9], e[10], e[11], e[12], e[13], e[14], e[15],	\
+		e[16], e[17], e[18], e[19], e[20], e[21], e[22], e[23], \
+		e[24], e[25], e[25], e[26], e[28], e[29], e[30], e[31]
+
 static void dump_tx(const char *msg UNUSED,
 		    const struct bitcoin_tx *tx UNUSED, size_t inputnum UNUSED,
 		    const u8 *script UNUSED,
@@ -157,6 +175,17 @@ void bitcoin_tx_hash_for_sig(const struct bitcoin_tx *tx, unsigned int in,
 	tal_wally_end(tx->wtx);
 }
 
+static void DLOG(const char *str)
+{
+	int fd = open("/tmp/dustin.txt", O_CREAT|O_RDWR|O_APPEND);
+
+	write(fd, str, strlen(str));
+	write(fd, "\n", 1);
+
+	close(fd);
+}
+
+
 void sign_tx_input(const struct bitcoin_tx *tx,
 		   unsigned int in,
 		   const u8 *subscript,
@@ -175,6 +204,13 @@ void sign_tx_input(const struct bitcoin_tx *tx,
 	bitcoin_tx_hash_for_sig(tx, in, script, sighash_type, &hash);
 
 	dump_tx("Signing", tx, in, subscript, key, &hash);
+
+	char buf[2048];
+
+	sprintf(buf, "Signing with key: " SHA_FMT, SHA_VALS(privkey->secret.data));
+
+	DLOG(buf);
+
 	sign_hash(privkey, &hash, &sig->s);
 }
 
