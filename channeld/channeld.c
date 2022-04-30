@@ -1746,7 +1746,7 @@ static void handle_peer_commit_sig(struct peer *peer, const u8 *msg)
 	//TODO: Check below should check if a splice is being sent and not error out
 
 	changed_htlcs = tal_arr(msg, const struct htlc *, 0);
-	if (false && !channel_rcvd_commit(peer->channel, &changed_htlcs)) {
+	if (!channel_rcvd_commit(peer->channel, &changed_htlcs)) {
 		/* BOLT #2:
 		 *
 		 * A sending node:
