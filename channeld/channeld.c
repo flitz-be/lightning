@@ -2917,7 +2917,7 @@ static void handle_splice_finalize(struct peer *peer, const u8 *inmsg)
 	ictx.pause_when_complete = false;
 
 	ictx.current_psbt = tal_dup(NULL, struct wally_psbt, peer->current_psbt);
-	ictx.desired_psbt = ictx.desired_psbt;
+	ictx.desired_psbt = ictx.current_psbt;
 
 	memcpy(ictx.tx_msg_count, peer->tx_msg_count, sizeof(peer->tx_msg_count));
 
