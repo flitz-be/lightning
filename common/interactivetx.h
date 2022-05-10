@@ -50,7 +50,7 @@ struct interactivetx_context {
 	/* Optional field for storing your side's desired psbt state, to be
 	 * used inside 'next_update'.
 	 *
-	 * If returned from next_update (the default) its memory will be taken
+	 * If returned from next_update (the default) its memory will be stolen
 	 */
 	struct wally_psbt *desired_psbt STEALS;
 
