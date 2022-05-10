@@ -1,12 +1,12 @@
 #ifndef LIGHTNING_INTERACTIVETX_INTERACTIVETX_H
 #define LIGHTNING_INTERACTIVETX_INTERACTIVETX_H
 
-#include <common/tx_roles.h>
 #include <ccan/short_types/short_types.h>
 #include <common/channel_id.h>
-
-struct wally_psbt;
-struct per_peer_state;
+#include <common/per_peer_state.h>
+#include <common/tx_roles.h>
+#include <common/utils.h>
+#include <wally_psbt.h>
 
 /* Interactive tx handles the building and updating of a transaction between
  * two peers. A PSBT is passed back and forth between two peers in steps. In
@@ -29,9 +29,13 @@ struct interactivetx_context {
 	/* Track how many of each tx collab msg we receive */
 	u16 tx_msg_count[INTERACTIVETX_NUM_TX_MSGS];
 
-	/* Returns a PSBT with at least once change to the transaction as seen
-	 * in ictx->current_psbt. If more than one change is returned, only 
-	 * the *first* change will be utilized for a given cycle.
+	/* Returns a PSBT with at least one change to the transaction as
+	 * compared to ictx->current_psbt.
+	 *
+	 * If set to NULL, the default implementation will simply return
+	 * ictx->desired_psbt.
+	 *
+	 * The resulting psbt's memory is taken.
 	 *
 	 * If no more changes are demanded, return NULL or return current_psbt
 	 * unchanged to signal completion.
@@ -40,16 +44,15 @@ struct interactivetx_context {
 
 	/* Set this to the intial psbt. If NULL will be filled with an empty
 	 * psbt.
-	 *
-	 * Between next_update rounds it will be updated with one local change
-	 * (if any) and one remote change (if any).
 	 */
 	struct wally_psbt *current_psbt;
 
 	/* Optional field for storing your side's desired psbt state, to be
 	 * used inside 'next_update'.
+	 *
+	 * If returned from next_update (the default) its memory will be taken
 	 */
-	struct wally_psbt *desired_psbt;
+	struct wally_psbt *desired_psbt STEALS;
 
 	/* If true, process_interactivetx_updates will return when local changes
 	 * are exhausted and 'tx_complete' will not be sent.
@@ -71,6 +74,7 @@ struct interactivetx_context {
  * 
  * Returns NULL on success or a description of the error on failure.
  */
-char *process_interactivetx_updates(struct interactivetx_context *ictx, bool *received_tx_complete);
+char *process_interactivetx_updates(struct interactivetx_context *ictx,
+				    bool *received_tx_complete);
 
 #endif /* LIGHTNING_INTERACTIVETX_INTERACTIVETX_H */
