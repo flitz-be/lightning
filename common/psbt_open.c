@@ -314,11 +314,10 @@ struct psbt_changeset *psbt_get_changeset(const tal_t *ctx,
 			j++;
 			continue;
 		}
-		(void)output_identical;
-		// if (!output_identical(orig, i, new, j)) {
-		// 	ADD(output, set->rm_outs, orig, i);
-		// 	ADD(output, set->added_outs, new, j);
-		// }
+		if (!output_identical(orig, i, new, j)) {
+			ADD(output, set->rm_outs, orig, i);
+			ADD(output, set->added_outs, new, j);
+		}
 		i++;
 		j++;
 	}
