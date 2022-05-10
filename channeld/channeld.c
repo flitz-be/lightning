@@ -2694,7 +2694,7 @@ static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 	assert(INTERACTIVETX_NUM_TX_MSGS == 4);
 	ictx.next_update = next_splice_step;
 	ictx.current_psbt = NULL;
-	ictx.desired_psbt = create_psbt(tmpctx, 0, 0, 0);
+	ictx.desired_psbt = create_psbt(NULL, 0, 0, 0);
 	ictx.pause_when_complete = true;
 
 	/* We go first as the receiver of the ack.
@@ -2706,7 +2706,7 @@ static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 
 	assert(NUM_SIDES == 2);
 
-	redeemscript = bitcoin_redeem_2of2(tmpctx,
+	redeemscript = bitcoin_redeem_2of2(NULL,
 					   &peer->channel->funding_pubkey[0],
 					   &peer->channel->funding_pubkey[1]);
 
@@ -2723,7 +2723,7 @@ static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 	/* Segwit requires us to store the value of the outpoint being spent,
 	 * so let's do that */
 
-	u8 *scriptPubkey = scriptpubkey_p2wsh(tmpctx, redeemscript);
+	u8 *scriptPubkey = scriptpubkey_p2wsh(NULL, redeemscript);
 
 	psbt_input_set_wit_utxo(ictx.desired_psbt, 0,
 				scriptPubkey, peer->channel->funding_sats);
@@ -2742,7 +2742,7 @@ static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 	 *       funding keys using the higher of the two `generation` fields.
 	 */
 	psbt_append_output(ictx.desired_psbt,
-			   scriptpubkey_p2wsh(tmpctx, redeemscript),
+			   scriptpubkey_p2wsh(NULL, redeemscript),
 			   amount_sat(0));
 
 	//TODO: Sometimes our peer assert fails on 
@@ -2751,6 +2751,8 @@ static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 
 	psbt_add_serials(ictx.desired_psbt, ictx.our_role);
 	psbt_sort_by_serial_id(ictx.desired_psbt);
+
+	tal_steal(NULL, ictx.desired_psbt);
 
 	char *error = process_interactivetx_updates(&ictx, &peer->received_tx_complete);
 
