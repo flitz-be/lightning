@@ -60,21 +60,21 @@ static u8 *read_next_msg(const tal_t *ctx,
 			 struct interactivetx_context *state,
 			 char **error)
 {
+	u8 *msg = NULL;
+
 	for (;;) {
-		u8 *msg;
 		char *err;
 		bool warning;
 		struct channel_id actual;
 		enum peer_wire t;
 
-		/* This helper routine polls the peer. */
-		msg = peer_read(tmpctx, state->pps);
+		/* Prevent runaway memory usage from many messages */
 
-		/* Special note:
-		 * Plese ensure 'msg' is cleared on each loop iteration,
-		 * to prevent against runaway memory usage from excessive
-		 * peer messages
-		 */
+		if(msg)
+			tal_free(msg);
+
+		/* This helper routine polls the peer. */
+		msg = peer_read(ctx, state->pps);
 
 		/* BOLT #1:
 		 *
@@ -82,11 +82,8 @@ static u8 *read_next_msg(const tal_t *ctx,
 		 *   - upon receiving a message of _odd_, unknown type:
 		 *     - MUST ignore the received message.
 		 */
-		if (is_unknown_msg_discardable(msg)) {
-
-			tal_free(msg);
+		if (is_unknown_msg_discardable(msg))
 			continue;
-		}
 
 		/* A helper which decodes an error. */
 		if (is_peer_error(msg, msg, &state->channel_id,
@@ -99,11 +96,10 @@ static u8 *read_next_msg(const tal_t *ctx,
 			 */
 			/* In this case, is_peer_error returns true, but sets
 			 * err to NULL */
-			if (!err) {
-				tal_free(msg);
+			if (!err)
 				continue;
-			}
-			*error = tal_fmt(tmpctx, "They sent %s", err);
+
+			*error = tal_fmt(ctx, "They sent %s", err);
 
 			tal_free(msg);
 			/* Return NULL so caller knows to stop negotiating. */
@@ -125,7 +121,6 @@ static u8 *read_next_msg(const tal_t *ctx,
 				   take(towire_errorfmt(NULL, &actual,
 							"Multiple channels"
 							" unsupported")));
-			tal_free(msg);
 			continue;
 		}
 
@@ -182,7 +177,7 @@ static u8 *read_next_msg(const tal_t *ctx,
 #if EXPERIMENTAL_FEATURES
 		case WIRE_STFU:
 #endif
-		*error = tal_fmt(NULL, "Received invalid message from peer: %d", t);
+		*error = tal_fmt(ctx, "Received invalid message from peer: %d", t);
 		return NULL;
 		}
 	}
@@ -209,7 +204,6 @@ static char *send_next(struct interactivetx_context *ictx, bool *finished)
 	if(tal_count(set->added_ins) != 0) {
 
 		const struct input_set *in = &set->added_ins[0];
-		u8 *wit_script;
 		u8 *prevtx;
 		struct bitcoin_outpoint outpoint;
 
@@ -218,10 +212,8 @@ static char *send_next(struct interactivetx_context *ictx, bool *finished)
 
 		if(in->input.utxo) {
 
-			prevtx = linearize_wtx(NULL,
+			prevtx = linearize_wtx(tmpctx,
 					       in->input.utxo);
-
-			assert(tal_bytelen(prevtx));
 		}
 		else {
 			/* Fail if we don't have the previous tx */
@@ -234,23 +226,10 @@ static char *send_next(struct interactivetx_context *ictx, bool *finished)
 
 		outpoint.n = in->tx_input.index;
 
-		if(in->input.redeem_script_len) {
-
-			wit_script = tal_dup_arr(NULL,
-						 u8,
-						 in->input.redeem_script,
-						 in->input.redeem_script_len,
-						 0);
-		}
-		else {
-
-			wit_script = NULL;
-		}
-
-		msg = towire_tx_add_input(NULL, cid, serial_id,
+		msg = towire_tx_add_input(tmpctx, cid, serial_id,
 					  prevtx, in->tx_input.index,
 					  in->tx_input.sequence,
-					  wit_script);
+					  NULL);
 
 		tal_arr_remove(&set->added_ins, 0);
 
@@ -261,7 +240,7 @@ static char *send_next(struct interactivetx_context *ictx, bool *finished)
 					&serial_id))
 			abort();
 
-		msg = towire_tx_remove_input(NULL, cid, serial_id);
+		msg = towire_tx_remove_input(tmpctx, cid, serial_id);
 
 		tal_arr_remove(&set->rm_ins, 0);
 	}
@@ -279,9 +258,9 @@ static char *send_next(struct interactivetx_context *ictx, bool *finished)
 
 		asset_amt = wally_tx_output_get_amount(&out->tx_output);
 		sats = amount_asset_to_sat(&asset_amt);
-		script = wally_tx_output_get_script(NULL, &out->tx_output);
+		script = wally_tx_output_get_script(tmpctx, &out->tx_output);
 
-		msg = towire_tx_add_output(NULL,
+		msg = towire_tx_add_output(tmpctx,
 					   cid,
 					   serial_id,
 					   sats.satoshis,
@@ -295,7 +274,7 @@ static char *send_next(struct interactivetx_context *ictx, bool *finished)
 					&serial_id))
 			abort();
 
-		msg = towire_tx_remove_output(NULL, cid, serial_id);
+		msg = towire_tx_remove_output(tmpctx, cid, serial_id);
 
 		tal_arr_remove(&set->rm_outs, 0);
 	}
@@ -331,7 +310,7 @@ char *process_interactivetx_updates(struct interactivetx_context *ictx,
 	assert(NUM_TX_MSGS == INTERACTIVETX_NUM_TX_MSGS);
 
 	if(ictx->current_psbt == NULL)
-		ictx->current_psbt = create_psbt(NULL, 0, 0, 0);
+		ictx->current_psbt = create_psbt(tmpctx, 0, 0, 0);
 	
 	/* Opener always sends the first utxo info */
 	bool we_complete = false, they_complete = false;
@@ -348,11 +327,11 @@ char *process_interactivetx_updates(struct interactivetx_context *ictx,
 
 	if(next_psbt) {
 
-		ictx->change_set = psbt_get_changeset(NULL,
+		ictx->change_set = psbt_get_changeset(tmpctx,
 						     ictx->current_psbt,
 						     next_psbt);
 
-		ictx->current_psbt = tal_dup(NULL,
+		ictx->current_psbt = tal_dup(tmpctx,
 					     struct wally_psbt,
 					     next_psbt);
 	}
@@ -385,7 +364,7 @@ char *process_interactivetx_updates(struct interactivetx_context *ictx,
 			*received_tx_complete = false;
 
 		/* read_next_msg will clear the tmpctx */
-		msg = read_next_msg(NULL, ictx, &error);
+		msg = read_next_msg(tmpctx, ictx, &error);
 
 		if(error)
 			return error;
@@ -402,7 +381,7 @@ char *process_interactivetx_updates(struct interactivetx_context *ictx,
 			struct bitcoin_tx *tx;
 			struct bitcoin_outpoint outpoint;
 
-			if (!fromwire_tx_add_input(NULL, msg, &cid,
+			if (!fromwire_tx_add_input(tmpctx, msg, &cid,
 						   &serial_id,
 						   cast_const2(u8 **,
 							       &tx_bytes),
@@ -446,7 +425,7 @@ char *process_interactivetx_updates(struct interactivetx_context *ictx,
 
 			/* Convert tx_bytes to a tx! */
 			len = tal_bytelen(tx_bytes);
-			tx = pull_bitcoin_tx(NULL, &tx_bytes, &len);
+			tx = pull_bitcoin_tx(tmpctx, &tx_bytes, &len);
 
 			if (!tx || len != 0)
 				return tal_fmt(tmpctx, "Invalid tx sent. len: %d", (int)len);
@@ -496,9 +475,7 @@ char *process_interactivetx_updates(struct interactivetx_context *ictx,
 			 */
 			struct wally_psbt_input *in =
 				psbt_append_input(ictx->current_psbt, &outpoint,
-						  sequence, NULL,
-						  redeemscript,
-						  redeemscript);
+						  sequence, NULL, NULL, NULL);
 			if (!in)
 				return tal_fmt(tmpctx,
 					       "Unable to add input %s",
@@ -508,9 +485,9 @@ char *process_interactivetx_updates(struct interactivetx_context *ictx,
 
 			tal_wally_start();
 			wally_psbt_input_set_utxo(in, tx->wtx);
-			tal_wally_end(NULL);
+			tal_wally_end(tmpctx);
 
-			psbt_input_set_serial_id(NULL, in, serial_id);
+			psbt_input_set_serial_id(tmpctx, in, serial_id);
 
 			break;
 		}
@@ -555,7 +532,7 @@ char *process_interactivetx_updates(struct interactivetx_context *ictx,
 			u8 *scriptpubkey;
 			struct wally_psbt_output *out;
 			struct amount_sat amt;
-			if (!fromwire_tx_add_output(NULL, msg, &cid,
+			if (!fromwire_tx_add_output(tmpctx, msg, &cid,
 						    &serial_id, &value,
 						    &scriptpubkey))
 				return tal_fmt(tmpctx,
@@ -607,7 +584,7 @@ char *process_interactivetx_updates(struct interactivetx_context *ictx,
 						 scriptpubkey,
 						 amt);
 
-			psbt_output_set_serial_id(NULL, out, serial_id);
+			psbt_output_set_serial_id(tmpctx, out, serial_id);
 			break;
 		}
 		case WIRE_TX_REMOVE_OUTPUT: {
