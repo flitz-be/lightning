@@ -35,12 +35,12 @@ struct interactivetx_context {
 	 * If set to NULL, the default implementation will simply return
 	 * ictx->desired_psbt.
 	 *
-	 * The resulting psbt's memory is taken.
+	 * The resulting psbt's memory is stolen.
 	 *
 	 * If no more changes are demanded, return NULL or return current_psbt
 	 * unchanged to signal completion.
 	 */
-	struct wally_psbt *(*next_update)(struct interactivetx_context *ictx);
+	struct wally_psbt STEALS *(*next_update)(struct interactivetx_context *ictx);
 
 	/* Set this to the intial psbt. If NULL will be filled with an empty
 	 * psbt.
@@ -63,18 +63,18 @@ struct interactivetx_context {
 	struct psbt_changeset *change_set;
 };
 
-/* Blocks the thread until
- * 1) both peers are happy with the state of the transaction,
- * 2) we've run out of local changes and 'pause_when_complete' is true, or
- * 3) some kind of error / validation failure occurs.
+/* Blocks the thread until we run out of changes (and we send tx_complete),
+ * or an error occurs. If 'pause_when_complete' is set, this behavior changes
+ * and we return without sending tx_complete.
  * 
  * If received_tx_complete is not NULL:
- * in -> true means we already received tx_complete in a previous round.
+ * in -> true means we assume we've received tx_complete in a previous round.
  * out -> true means the last message from the peer was 'tx_complete'.
  * 
  * Returns NULL on success or a description of the error on failure.
  */
-char *process_interactivetx_updates(struct interactivetx_context *ictx,
+char *process_interactivetx_updates(const tal_t *ctx,
+				    struct interactivetx_context *ictx,
 				    bool *received_tx_complete);
 
 #endif /* LIGHTNING_INTERACTIVETX_INTERACTIVETX_H */
