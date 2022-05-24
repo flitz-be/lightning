@@ -1,8 +1,8 @@
 #include "config.h"
 #include "interactivetx.h"
 #include <bitcoin/chainparams.h>
-#include <bitcoin/script.h>
 #include <bitcoin/psbt.h>
+#include <bitcoin/script.h>
 #include <ccan/array_size/array_size.h>
 #include <ccan/cast/cast.h>
 #include <ccan/mem/mem.h>
@@ -43,14 +43,15 @@ enum tx_msgs {
  */
 #define MAX_TX_MSG_RCVD (1 << 12)
 
-static bool is_segwit_output(struct wally_tx_output *output,
+static bool is_segwit_output(const tal_t *ctx,
+			     struct wally_tx_output *output,
 			     const u8 *redeemscript)
 {
 	const u8 *wit_prog;
 	if (tal_bytelen(redeemscript) > 0)
 		wit_prog = redeemscript;
 	else
-		wit_prog = wally_tx_output_get_script(tmpctx, output);
+		wit_prog = wally_tx_output_get_script(ctx, output);
 
 	return is_p2wsh(wit_prog, NULL) || is_p2wpkh(wit_prog, NULL);
 }
@@ -177,19 +178,16 @@ static u8 *read_next_msg(const tal_t *ctx,
 #if EXPERIMENTAL_FEATURES
 		case WIRE_STFU:
 #endif
-		*error = tal_fmt(ctx, "Received invalid message from peer: %d", t);
+		*error = tal_fmt(ctx,
+				 "Received invalid message from peer: %d", t);
 		return NULL;
 		}
 	}
-
-	return NULL;
 }
 
-const u8 *linearize_input(const tal_t *ctx,
-		 const struct wally_psbt_input *in,
-		 const struct wally_tx_input *tx_in);
-
-static char *send_next(struct interactivetx_context *ictx, bool *finished)
+static char *send_next(const tal_t *ctx,
+		       struct interactivetx_context *ictx,
+		       bool *finished)
 {
 	struct channel_id *cid = &ictx->channel_id;
 	struct psbt_changeset *set = ictx->change_set;
@@ -204,21 +202,17 @@ static char *send_next(struct interactivetx_context *ictx, bool *finished)
 	if(tal_count(set->added_ins) != 0) {
 
 		const struct input_set *in = &set->added_ins[0];
-		u8 *prevtx;
 		struct bitcoin_outpoint outpoint;
+		u8 *prevtx;
 
 		if (!psbt_get_serial_id(&in->input.unknowns, &serial_id))
 			abort();
 
-		if(in->input.utxo) {
-
-			prevtx = linearize_wtx(tmpctx,
+		if(in->input.utxo)
+			prevtx = linearize_wtx(ctx,
 					       in->input.utxo);
-		}
-		else {
-			/* Fail if we don't have the previous tx */
-			return NULL;
-		}
+		else
+			return "PSBT needs the previous transaction set.";
 
 		memcpy(outpoint.txid.shad.sha.u.u8,
 		       in->tx_input.txhash,
@@ -226,7 +220,7 @@ static char *send_next(struct interactivetx_context *ictx, bool *finished)
 
 		outpoint.n = in->tx_input.index;
 
-		msg = towire_tx_add_input(tmpctx, cid, serial_id,
+		msg = towire_tx_add_input(ctx, cid, serial_id,
 					  prevtx, in->tx_input.index,
 					  in->tx_input.sequence,
 					  NULL);
@@ -240,7 +234,7 @@ static char *send_next(struct interactivetx_context *ictx, bool *finished)
 					&serial_id))
 			abort();
 
-		msg = towire_tx_remove_input(tmpctx, cid, serial_id);
+		msg = towire_tx_remove_input(ctx, cid, serial_id);
 
 		tal_arr_remove(&set->rm_ins, 0);
 	}
@@ -258,9 +252,9 @@ static char *send_next(struct interactivetx_context *ictx, bool *finished)
 
 		asset_amt = wally_tx_output_get_amount(&out->tx_output);
 		sats = amount_asset_to_sat(&asset_amt);
-		script = wally_tx_output_get_script(tmpctx, &out->tx_output);
+		script = wally_tx_output_get_script(ctx, &out->tx_output);
 
-		msg = towire_tx_add_output(tmpctx,
+		msg = towire_tx_add_output(ctx,
 					   cid,
 					   serial_id,
 					   sats.satoshis,
@@ -274,7 +268,7 @@ static char *send_next(struct interactivetx_context *ictx, bool *finished)
 					&serial_id))
 			abort();
 
-		msg = towire_tx_remove_output(tmpctx, cid, serial_id);
+		msg = towire_tx_remove_output(ctx, cid, serial_id);
 
 		tal_arr_remove(&set->rm_outs, 0);
 	}
@@ -297,22 +291,22 @@ tx_complete:
 
 	if(!ictx->pause_when_complete) {
 
-		msg = towire_tx_complete(tmpctx, cid);
+		msg = towire_tx_complete(ctx, cid);
 		peer_write(ictx->pps, msg);
 	}
 
 	return NULL;
 }
 
-char *process_interactivetx_updates(struct interactivetx_context *ictx,
+char *process_interactivetx_updates(const tal_t *ctx,
+			 	    struct interactivetx_context *ictx,
 				    bool *received_tx_complete)
 {
 	assert(NUM_TX_MSGS == INTERACTIVETX_NUM_TX_MSGS);
 
 	if(ictx->current_psbt == NULL)
-		ictx->current_psbt = create_psbt(tmpctx, 0, 0, 0);
+		ictx->current_psbt = create_psbt(ctx, 0, 0, 0);
 	
-	/* Opener always sends the first utxo info */
 	bool we_complete = false, they_complete = false;
 	u8 *msg;
 	char *error = NULL;
@@ -320,25 +314,36 @@ char *process_interactivetx_updates(struct interactivetx_context *ictx,
 	if(received_tx_complete)
 		they_complete = *received_tx_complete;
 
+	/* Build change_set and handle PSBT variables */
+
 	ictx->change_set = NULL;
 
-	/* Go ask Alice for changes, I think she'll know. */
-	struct wally_psbt *next_psbt = ictx->next_update(ictx);
+	struct wally_psbt *next_psbt;
 
-	if(next_psbt) {
+	if(ictx->next_update)
+		next_psbt = ictx->next_update(ictx);
+	else
+		next_psbt = ictx->desired_psbt;
 
-		ictx->change_set = psbt_get_changeset(tmpctx,
-						     ictx->current_psbt,
-						     next_psbt);
+	if(!next_psbt)
+		next_psbt = ictx->current_psbt;
 
-		ictx->current_psbt = tal_dup(tmpctx,
-					     struct wally_psbt,
+	ictx->change_set = psbt_get_changeset(ctx,
+					     ictx->current_psbt,
 					     next_psbt);
+
+	if(ictx->current_psbt != next_psbt) {
+
+		tal_free(ictx->current_psbt);
+
+		ictx->current_psbt = next_psbt;
 	}
+
+	/* As initiator we always start with a single send to start it off */
 
 	if(ictx->our_role == TX_INITIATOR) {
 
-		char *error = send_next(ictx, &we_complete);
+		char *error = send_next(ctx, ictx, &we_complete);
 
 		if(error)
 			return error;
@@ -350,6 +355,8 @@ char *process_interactivetx_updates(struct interactivetx_context *ictx,
 			return NULL;
 		}
 	}
+
+	/* Loop through tx update turns with peer */
 
 	while (!(we_complete && they_complete)) {
 		struct channel_id cid;
@@ -363,14 +370,10 @@ char *process_interactivetx_updates(struct interactivetx_context *ictx,
 		if(received_tx_complete)
 			*received_tx_complete = false;
 
-		/* read_next_msg will clear the tmpctx */
-		msg = read_next_msg(tmpctx, ictx, &error);
+		msg = read_next_msg(ctx, ictx, &error);
 
 		if(error)
 			return error;
-
-		if (!msg)
-			return "Interactivetx::read_next_msg failed.";
 
 		t = fromwire_peektype(msg);
 		switch (t) {
@@ -381,16 +384,16 @@ char *process_interactivetx_updates(struct interactivetx_context *ictx,
 			struct bitcoin_tx *tx;
 			struct bitcoin_outpoint outpoint;
 
-			if (!fromwire_tx_add_input(tmpctx, msg, &cid,
+			if (!fromwire_tx_add_input(ctx, msg, &cid,
 						   &serial_id,
 						   cast_const2(u8 **,
 							       &tx_bytes),
 						   &outpoint.n, &sequence,
 						   cast_const2(u8 **,
 							       &redeemscript)))
-				return tal_fmt(tmpctx,
+				return tal_fmt(ctx,
 					       "Parsing tx_add_input %s",
-					       tal_hex(tmpctx, msg));
+					       tal_hex(ctx, msg));
 
 			/*
 			 * BOLT-f53ca2301232db780843e894f55d95d512f297f9 #2:
@@ -400,7 +403,7 @@ char *process_interactivetx_updates(struct interactivetx_context *ictx,
 			 *   messages during this negotiation
 			 */
 			if (++ictx->tx_msg_count[TX_ADD_INPUT] > MAX_TX_MSG_RCVD)
-				return tal_fmt(tmpctx, "Too many `tx_add_input`s"
+				return tal_fmt(ctx, "Too many `tx_add_input`s"
 					       " received %d", MAX_TX_MSG_RCVD);
 			/*
 			 * BOLT-f53ca2301232db780843e894f55d95d512f297f9 #2:
@@ -409,7 +412,7 @@ char *process_interactivetx_updates(struct interactivetx_context *ictx,
 			 *   - the `serial_id` has the wrong parity
 			 */
 			if (serial_id % 2 == ictx->our_role)
-				return tal_fmt(tmpctx,
+				return tal_fmt(ctx,
 					       "Invalid serial_id rcvd. %"PRIu64,
 					       serial_id);
 			/*
@@ -420,18 +423,19 @@ char *process_interactivetx_updates(struct interactivetx_context *ictx,
 			 *   the transaction
 			 */
 			if (psbt_find_serial_input(ictx->current_psbt, serial_id) != -1)
-				return tal_fmt(tmpctx, "Duplicate serial_id rcvd."
+				return tal_fmt(ctx, "Duplicate serial_id rcvd."
 					       " %"PRIu64, serial_id);
 
 			/* Convert tx_bytes to a tx! */
 			len = tal_bytelen(tx_bytes);
-			tx = pull_bitcoin_tx(tmpctx, &tx_bytes, &len);
+			tx = pull_bitcoin_tx(ctx, &tx_bytes, &len);
 
 			if (!tx || len != 0)
-				return tal_fmt(tmpctx, "Invalid tx sent. len: %d", (int)len);
+				return tal_fmt(ctx, "Invalid tx sent. len: %d",
+					       (int)len);
 
 			if (outpoint.n >= tx->wtx->num_outputs)
-				return tal_fmt(tmpctx,
+				return tal_fmt(ctx,
 					       "Invalid tx outnum sent. %u",
 					       outpoint.n);
 			/*
@@ -441,15 +445,14 @@ char *process_interactivetx_updates(struct interactivetx_context *ictx,
 			 *   - the `prevtx_out` input of `prevtx` is
 			 *   not an `OP_0` to `OP_16` followed by a single push
 			 */
-			(void)is_segwit_output;
-			//TODO fix witness script...
-			// if (!is_segwit_output(&tx->wtx->outputs[outpoint.n],
-			// 		      redeemscript))
-			// 	return tal_fmt(tmpctx,
-			// 		       "Invalid tx sent. Not SegWit %s",
-			// 		       type_to_string(tmpctx,
-			// 				      struct bitcoin_tx,
-			// 				      tx));
+			if (!is_segwit_output(ctx,
+					      &tx->wtx->outputs[outpoint.n],
+					      redeemscript))
+				return tal_fmt(ctx,
+					       "Invalid tx sent. Not SegWit %s",
+					       type_to_string(ctx,
+							      struct bitcoin_tx,
+							      tx));
 
 			/*
 			 * BOLT-f53ca2301232db780843e894f55d95d512f297f9 #2:
@@ -461,10 +464,10 @@ char *process_interactivetx_updates(struct interactivetx_context *ictx,
 			 */
 			bitcoin_txid(tx, &outpoint.txid);
 			if (psbt_has_input(ictx->current_psbt, &outpoint))
-				return tal_fmt(tmpctx,
+				return tal_fmt(ctx,
 					       "Unable to add input %s- "
 					       "already present",
-					       type_to_string(tmpctx,
+					       type_to_string(ctx,
 							      struct bitcoin_outpoint,
 							      &outpoint));
 
@@ -477,17 +480,17 @@ char *process_interactivetx_updates(struct interactivetx_context *ictx,
 				psbt_append_input(ictx->current_psbt, &outpoint,
 						  sequence, NULL, NULL, NULL);
 			if (!in)
-				return tal_fmt(tmpctx,
+				return tal_fmt(ctx,
 					       "Unable to add input %s",
-					       type_to_string(tmpctx,
+					       type_to_string(ctx,
 							      struct bitcoin_outpoint,
 							      &outpoint));
 
 			tal_wally_start();
 			wally_psbt_input_set_utxo(in, tx->wtx);
-			tal_wally_end(tmpctx);
+			tal_wally_end(ctx);
 
-			psbt_input_set_serial_id(tmpctx, in, serial_id);
+			psbt_input_set_serial_id(ctx, in, serial_id);
 
 			break;
 		}
@@ -495,9 +498,9 @@ char *process_interactivetx_updates(struct interactivetx_context *ictx,
 			int input_index;
 
 			if (!fromwire_tx_remove_input(msg, &cid, &serial_id))
-				return tal_fmt(tmpctx,
+				return tal_fmt(ctx,
 					       "Parsing tx_remove_input %s",
-					       tal_hex(tmpctx, msg));
+					       tal_hex(ctx, msg));
 
 			/* BOLT-f53ca2301232db780843e894f55d95d512f297f9 #2:
 			 * The receiving node:  ...
@@ -506,8 +509,10 @@ char *process_interactivetx_updates(struct interactivetx_context *ictx,
 			 *   `serial_id` was not added by the sender
 			 */
 			if (serial_id % 2 == ictx->our_role)
-				return tal_fmt(tmpctx,
-					       "Invalid serial_id rcvd. %"PRIu64,
+				return tal_fmt(ctx,
+					       "Input can't be removed by peer "
+					       "because they did not add it. "
+					       "serial_id: %"PRIu64,
 					       serial_id);
 
 			/* BOLT-f53ca2301232db780843e894f55d95d512f297f9 #2:
@@ -520,7 +525,7 @@ char *process_interactivetx_updates(struct interactivetx_context *ictx,
 							     serial_id);
 			/* We choose to error/fail negotiation */
 			if (input_index == -1)
-				return tal_fmt(tmpctx,
+				return tal_fmt(ctx,
 					       "No input added with serial_id"
 					       " %"PRIu64, serial_id);
 
@@ -532,12 +537,12 @@ char *process_interactivetx_updates(struct interactivetx_context *ictx,
 			u8 *scriptpubkey;
 			struct wally_psbt_output *out;
 			struct amount_sat amt;
-			if (!fromwire_tx_add_output(tmpctx, msg, &cid,
+			if (!fromwire_tx_add_output(ctx, msg, &cid,
 						    &serial_id, &value,
 						    &scriptpubkey))
-				return tal_fmt(tmpctx,
+				return tal_fmt(ctx,
 					       "Parsing tx_add_output %s",
-					       tal_hex(tmpctx, msg));
+					       tal_hex(ctx, msg));
 
 			/*
 			 * BOLT-f53ca2301232db780843e894f55d95d512f297f9 #2:
@@ -547,7 +552,7 @@ char *process_interactivetx_updates(struct interactivetx_context *ictx,
 			 *   messages during this negotiation
 			 */
 			if (++ictx->tx_msg_count[TX_ADD_OUTPUT] > MAX_TX_MSG_RCVD)
-				return tal_fmt(tmpctx,
+				return tal_fmt(ctx,
 					       "Too many `tx_add_output`s"
 					       " received (%d)",
 					       MAX_TX_MSG_RCVD);
@@ -558,7 +563,7 @@ char *process_interactivetx_updates(struct interactivetx_context *ictx,
 			 *   - the `serial_id` has the wrong parity
 			 */
 			if (serial_id % 2 == ictx->our_role)
-				return tal_fmt(tmpctx,
+				return tal_fmt(ctx,
 					       "Invalid serial_id rcvd. %"PRIu64,
 					       serial_id);
 
@@ -568,7 +573,7 @@ char *process_interactivetx_updates(struct interactivetx_context *ictx,
 			 *   - the `serial_id` is already included
 			 *   in the transaction */
 			if (psbt_find_serial_output(ictx->current_psbt, serial_id) != -1)
-				return tal_fmt(tmpctx,
+				return tal_fmt(ctx,
 					       "Duplicate serial_id rcvd."
 					       " %"PRIu64, serial_id);
 			amt = amount_sat(value);
@@ -578,22 +583,22 @@ char *process_interactivetx_updates(struct interactivetx_context *ictx,
 			 * - MAY fail the negotiation if `script`
 			 *   is non-standard */
 			if (!is_known_scripttype(scriptpubkey))
-				return tal_fmt(tmpctx, "Script is not standard");
+				return tal_fmt(ctx, "Script is not standard");
 
 			out = psbt_append_output(ictx->current_psbt,
 						 scriptpubkey,
 						 amt);
 
-			psbt_output_set_serial_id(tmpctx, out, serial_id);
+			psbt_output_set_serial_id(ctx, out, serial_id);
 			break;
 		}
 		case WIRE_TX_REMOVE_OUTPUT: {
 			int output_index;
 
 			if (!fromwire_tx_remove_output(msg, &cid, &serial_id))
-				return tal_fmt(tmpctx,
+				return tal_fmt(ctx,
 						 "Parsing tx_remove_output %s",
-						 tal_hex(tmpctx, msg));
+						 tal_hex(ctx, msg));
 
 			/* BOLT-f53ca2301232db780843e894f55d95d512f297f9 #2:
 			 * The receiving node: ...
@@ -602,9 +607,11 @@ char *process_interactivetx_updates(struct interactivetx_context *ictx,
 			 *   `serial_id` was not added by the sender
 			 */
 			if (serial_id % 2 == ictx->our_role)
-				return tal_fmt(tmpctx,
-					       "Invalid serial_id rcvd."
-					       " %"PRIu64, serial_id);
+				return tal_fmt(ctx,
+					       "Output can't be removed by peer "
+					       "because they did not add it. "
+					       "serial_id: %"PRIu64,
+					       serial_id);
 
 			/* BOLT-f53ca2301232db780843e894f55d95d512f297f9 #2:
 			 * The receiving node: ...
@@ -615,7 +622,7 @@ char *process_interactivetx_updates(struct interactivetx_context *ictx,
 			output_index = psbt_find_serial_output(ictx->current_psbt,
 							       serial_id);
 			if (output_index == -1)
-				return tal_fmt(tmpctx,
+				return tal_fmt(ctx,
 					       "No output added with serial_id"
 					       " %"PRIu64, serial_id);
 			psbt_rm_output(ictx->current_psbt, output_index);
@@ -623,9 +630,9 @@ char *process_interactivetx_updates(struct interactivetx_context *ictx,
 		}
 		case WIRE_TX_COMPLETE:
 			if (!fromwire_tx_complete(msg, &cid))
-				return tal_fmt(tmpctx,
+				return tal_fmt(ctx,
 					       "Parsing tx_complete %s",
-					       tal_hex(tmpctx, msg));
+					       tal_hex(ctx, msg));
 			they_complete = true;
 			if(received_tx_complete)
 				*received_tx_complete = true;
@@ -667,17 +674,17 @@ char *process_interactivetx_updates(struct interactivetx_context *ictx,
 		case WIRE_REPLY_SHORT_CHANNEL_IDS_END:
 		case WIRE_PING:
 		case WIRE_PONG:
+#if EXPERIMENTAL_FEATURES
 		case WIRE_SPLICE:
 		case WIRE_SPLICE_ACK:
-#if EXPERIMENTAL_FEATURES
 		case WIRE_STFU:
 #endif
-			return tal_fmt(tmpctx, "Unexpected wire message %s",
-						 tal_hex(tmpctx, msg));
+			return tal_fmt(ctx, "Unexpected wire message %s",
+				       tal_hex(ctx, msg));
 		}
 
 		if (!(we_complete && they_complete))
-			send_next(ictx, &we_complete);
+			send_next(ctx, ictx, &we_complete);
 	}
 
 	/* Sort psbt! */
