@@ -2435,7 +2435,7 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 	// &orig->inputs[i].unknowns
 	// not having a serial_id set.
 
-	char *error = process_interactivetx_updates(&ictx, NULL);
+	char *error = process_interactivetx_updates(tmpctx, &ictx, NULL);
 
 	if(error) {
 
@@ -2757,7 +2757,7 @@ static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 
 	tal_steal(NULL, ictx.desired_psbt);
 
-	char *error = process_interactivetx_updates(&ictx, &peer->received_tx_complete);
+	char *error = process_interactivetx_updates(tmpctx, &ictx, &peer->received_tx_complete);
 
 	psbt_add_serials(ictx.current_psbt, ictx.our_role);
 	psbt_sort_by_serial_id(ictx.current_psbt);
@@ -2873,7 +2873,7 @@ rm -rf /tmp/l1-regtest/ /tmp/l2-regtest/ && rm -rf "$PATH_TO_BITCOIN"
 	// psbt_add_serials(ictx.current_psbt, ictx.our_role);
 	// psbt_sort_by_serial_id(ictx.current_psbt);
 
-	char *error = process_interactivetx_updates(&ictx, &peer->received_tx_complete);
+	char *error = process_interactivetx_updates(tmpctx, &ictx, &peer->received_tx_complete);
 
 	if(error)
 		peer_failed_warn(peer->pps, &peer->channel_id,
@@ -2934,7 +2934,7 @@ static void handle_splice_finalize(struct peer *peer, const u8 *inmsg)
 
 	DLOG("handle_splice_finalize.3");
 
-	char *error = process_interactivetx_updates(&ictx, &peer->received_tx_complete);
+	char *error = process_interactivetx_updates(tmpctx, &ictx, &peer->received_tx_complete);
 
 	DLOG("handle_splice_finalize.4");
 
@@ -3149,7 +3149,7 @@ static void handle_splice_signed(struct peer *peer, const u8 *inmsg)
 							 der,
 							 der_len,
 							 0);
-	
+
 	ws[0]->witness_element[1] = tal(tmpctx, struct witness_element);
 
 	ws[0]->witness_element[1]->witness = (u8*)wit_script;
