@@ -1,6 +1,7 @@
-#ifndef LIGHTNING_INTERACTIVETX_INTERACTIVETX_H
-#define LIGHTNING_INTERACTIVETX_INTERACTIVETX_H
+#ifndef LIGHTNING_COMMON_INTERACTIVETX_H
+#define LIGHTNING_COMMON_INTERACTIVETX_H
 
+#include "config.h"
 #include <ccan/short_types/short_types.h>
 #include <common/channel_id.h>
 #include <common/per_peer_state.h>
@@ -66,15 +67,15 @@ struct interactivetx_context {
 /* Blocks the thread until we run out of changes (and we send tx_complete),
  * or an error occurs. If 'pause_when_complete' is set, this behavior changes
  * and we return without sending tx_complete.
- * 
+ *
  * If received_tx_complete is not NULL:
  * in -> true means we assume we've received tx_complete in a previous round.
  * out -> true means the last message from the peer was 'tx_complete'.
- * 
+ *
  * Returns NULL on success or a description of the error on failure.
  */
 char *process_interactivetx_updates(const tal_t *ctx,
 				    struct interactivetx_context *ictx,
 				    bool *received_tx_complete);
 
-#endif /* LIGHTNING_INTERACTIVETX_INTERACTIVETX_H */
+#endif /* LIGHTNING_COMMON_INTERACTIVETX_H */
