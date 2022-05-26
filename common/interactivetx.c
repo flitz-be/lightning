@@ -18,7 +18,6 @@
 #include <common/peer_billboard.h>
 #include <common/peer_failed.h>
 #include <common/peer_io.h>
-#include <common/per_peer_state.h>
 #include <common/psbt_internal.h>
 #include <common/psbt_open.h>
 #include <common/read_peer_msg.h>
@@ -89,12 +88,6 @@ static u8 *read_next_msg(const tal_t *ctx,
 		/* A helper which decodes an error. */
 		if (is_peer_error(msg, msg, &state->channel_id,
 				  &err, &warning)) {
-			/* BOLT #1:
-			 *
-			 *  - if no existing channel is referred to by the
-			 *    message:
-			 *    - MUST ignore the message.
-			 */
 			/* In this case, is_peer_error returns true, but sets
 			 * err to NULL */
 			if (!err)
@@ -257,7 +250,7 @@ static char *send_next(const tal_t *ctx,
 		msg = towire_tx_add_output(ctx,
 					   cid,
 					   serial_id,
-					   sats.satoshis,
+					   sats.satoshis, /* Raw: wire interface */
 					   script);
 
 		tal_arr_remove(&set->added_outs, 0);
@@ -306,7 +299,7 @@ char *process_interactivetx_updates(const tal_t *ctx,
 
 	if(ictx->current_psbt == NULL)
 		ictx->current_psbt = create_psbt(ctx, 0, 0, 0);
-	
+
 	bool we_complete = false, they_complete = false;
 	u8 *msg;
 	char *error = NULL;
