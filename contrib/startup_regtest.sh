@@ -148,71 +148,105 @@ start_ln() {
 		nodes="$1"
 	fi
 	start_nodes "$nodes" regtest
-	echo "	bt-cli, stop_ln, fund_ln"
+	echo "	bt-cli, stop_ln, fund_nodes"
 }
 
-fund_ln() {
+ensure_bitcoind_funds() {
 
-	if [ -z "$1" ]; then
-		node1=1
-	else
-		node1="$1"
+	if [ -z "$ADDRESS" ]; then
+		ADDRESS=$(bitcoin-cli "$WALLET" -regtest getnewaddress)
 	fi
 
-	if [ -z "$2" ]; then
-		node2=2
-	else
-		node2="$2"
+	balance=$(bitcoin-cli -regtest "$WALLET" getbalance)
+
+	if [ 1 -eq "$(echo "$balance"'<1' | bc -l)" ]; then
+
+		printf "%s" "Mining into address " "$ADDRESS""... "
+
+		bitcoin-cli -regtest generatetoaddress 100 "$ADDRESS" > /dev/null
+
+		echo "done."
+	fi
+}
+
+fund_nodes() {
+
+	WALLET="default"
+	NODES=""
+
+	for var in "$@"; do
+		case $var in
+			-w=*|--wallet=*)
+				WALLET="${var#*=}"
+				;;
+			*)
+				NODES="${NODES:+${NODES} }${var}"
+				;;
+		esac
+	done
+
+	if [ -z "$NODES" ]; then
+		NODES=$(seq $node_count)
 	fi
 
-	if [ -z "$3" ]; then
-		WALLET="-rpcwallet=default"
-	else
-		WALLET="-rpcwallet=$3"
-	fi
+	WALLET="-rpcwallet=$WALLET"
 
 	ADDRESS=$(bitcoin-cli "$WALLET" -regtest getnewaddress)
 
-	echo "minning into address $ADDRESS"
+	ensure_bitcoind_funds
 
-	bitcoin-cli -regtest generatetoaddress 125 "$ADDRESS" > "\dev\null"
+	echo "bitcoind balance:" "$(bitcoin-cli -regtest "$WALLET" getbalance)"
 
-	echo "Mined into $ADDRESS, checking balance"
-	bitcoin-cli -regtest "$WALLET" getbalance
+	last_node=""
 
-	L2_NODE_ID=$($LCLI --lightning-dir=/tmp/l$node2-regtest getinfo | jq -r .id)
-	L2_NODE_PORT=$($LCLI --lightning-dir=/tmp/l$node2-regtest getinfo | jq .binding[0].port)
+	for i in $NODES; do
 
-	echo "Node 2 id/port is : $L2_NODE_ID:$L2_NODE_PORT"
+		if [ -z "$last_node" ]; then
+			last_node=$i
+			continue
+		fi
 
-	$LCLI --lightning-dir=/tmp/l$node1-regtest connect "$L2_NODE_ID@localhost:$L2_NODE_PORT"
+		node1=$last_node
+		node2=$i
+		last_node=$i
 
-	$LCLI --lightning-dir=/tmp/l$node1-regtest listpeers
+		L2_NODE_ID=$($LCLI -F --lightning-dir=/tmp/l"$node2"-regtest getinfo | sed -n 's/^id=\(.*\)/\1/p')
+		L2_NODE_PORT=$($LCLI -F --lightning-dir=/tmp/l"$node2"-regtest getinfo | sed -n 's/^binding\[0\].port=\(.*\)/\1/p')
 
-	L1_WALLET_ADDR=$($LCLI "--lightning-dir=/tmp/l$node1-regtest" newaddr | jq -r .bech32)
+		$LCLI -H --lightning-dir=/tmp/l"$node1"-regtest connect "$L2_NODE_ID"@localhost:"$L2_NODE_PORT" > /dev/null
 
-	echo bitcoin-cli -regtest "$WALLET" sendtoaddress "$L1_WALLET_ADDR" 1000
+		L1_WALLET_ADDR=$($LCLI -F --lightning-dir=/tmp/l"$node1"-regtest newaddr | sed -n 's/^bech32=\(.*\)/\1/p')
 
-	bitcoin-cli -regtest "$WALLET" sendtoaddress "$L1_WALLET_ADDR" 1000
+		ensure_bitcoind_funds
 
-	bitcoin-cli -regtest generatetoaddress 24 "$ADDRESS" > /dev/null
+		bitcoin-cli -regtest "$WALLET" sendtoaddress "$L1_WALLET_ADDR" 1 > /dev/null
 
-	sleep 6
+		bitcoin-cli -regtest generatetoaddress 1 "$ADDRESS" > /dev/null
 
-	CHANNEL_RESULT=$($LCLI --lightning-dir=/tmp/l$node1-regtest fundchannel $L2_NODE_ID 1000000)
+		printf "%s" "Waiting for lightning node funds... "
 
-	echo "$CHANNEL_RESULT"
+		while ! $LCLI -F --lightning-dir=/tmp/l"$node1"-regtest listfunds | grep -q "outputs"
+		do
+			sleep 1
+		done
 
-	L_CHANNEL_ID=$(echo "$CHANNEL_RESULT" | jq -r .channel_id)
+		echo "found."
 
-	echo channel id is: "$L_CHANNEL_ID"
+		printf "%s" "Funding channel from node " "$node1" " to node " "$node2"". "
 
-	bitcoin-cli -regtest generatetoaddress 12 "$ADDRESS" > /dev/null
+		$LCLI --lightning-dir=/tmp/l"$node1"-regtest fundchannel "$L2_NODE_ID" 1000000 > /dev/null
 
-	sleep 6
+		bitcoin-cli -regtest generatetoaddress 6 "$ADDRESS" > /dev/null
 
-	$LCLI "--lightning-dir=/tmp/l$node1-regtest" listchannels
-	$LCLI "--lightning-dir=/tmp/l$node2-regtest" listchannels
+		printf "%s" "Waiting for confirmation... "
+
+		while ! $LCLI -F --lightning-dir=/tmp/l"$node1"-regtest listchannels | grep -q "channels"
+		do
+			sleep 1
+		done
+
+		echo "done."
+	done
 }
 
 stop_nodes() {
