@@ -1,11 +1,22 @@
-- move channel into stfu mode; fail if already in stfu mode
-- send splice 
-- negotiate the tx 
-	- reuse the interactive transaction building messages (init_rbf -> )
-- on reconnect, restart
-- tx_complete rcvd, validate splice tx
-- tx-sigs are exchanged... move out of stfu mode
+- move channel into stfu mode ✅
+-- fail if already in stfu mode ✅
+-- handle simultaneously stfu conflict (both are intiator) ✅
+- send splice ✅
+- negotiate the tx ✅
+	- reuse the interactive transaction building messages (init_rbf -> ) ✅
+- on reconnect, restart ✅
+- audit memory usage ✅
+- tx_complete rcvd, validate splice tx as dual open does ✅
+- tx_complete rcvd, validate splice tx conforms to splice spec
+- tx-sigs are exchanged... move out of stfu mode ✅
+-- (intiator side) ✅
+-- (ack side) ✅
+- confirm signed splice tx sigs are valid
+-- (intiator side) ✅
+-- (ack side)
 - broadcast signed splice tx
+-- (initiator side)
+-- (ack side)
 - on reconnect, handle re-transmission of tx-sigs
 - normal channel operation; 
 	- every commit_sigs, send commitment signatures for splice tx as well
