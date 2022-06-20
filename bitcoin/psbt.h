@@ -160,6 +160,10 @@ WARN_UNUSED_RESULT bool psbt_input_set_signature(struct wally_psbt *psbt, size_t
 						 const struct pubkey *pubkey,
 						 const struct bitcoin_signature *sig);
 
+WARN_UNUSED_RESULT bool psbt_input_set_signature_encode_der(struct wally_psbt *psbt, size_t in,
+                                                            const struct pubkey *pubkey,
+                                                            const struct bitcoin_signature *sig);
+
 void psbt_input_set_witscript(struct wally_psbt *psbt, size_t in, const u8 *wscript);
 
 /* psbt_input_set_unknown - Set the given Key-Value in the psbt's input keymap

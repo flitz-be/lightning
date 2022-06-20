@@ -1332,6 +1332,12 @@ bool channel_sending_commit(struct channel *channel,
 					   SENT_REMOVE_HTLC };
 	status_debug("Trying commit");
 
+	// TODO: Should this method check for splices?
+	/* A sending node:
+   *  - MUST NOT send a `commitment_signed` message that does not include any
+   * updates, or add or remove splices.
+   */
+
 	change = change_htlcs(channel, REMOTE, states, ARRAY_SIZE(states),
 			      htlcs, "sending_commit", false);
 	if (!change)

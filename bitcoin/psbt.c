@@ -293,6 +293,36 @@ bool psbt_input_set_signature(struct wally_psbt *psbt, size_t in,
 	return ok;
 }
 
+bool psbt_input_set_signature_encode_der(struct wally_psbt *psbt, size_t in,
+					 const struct pubkey *pubkey,
+					 const struct bitcoin_signature *sig)
+{
+	u8 pk_der[PUBKEY_CMPR_LEN];
+	unsigned char sig_der[EC_SIGNATURE_DER_MAX_LEN + 1];
+	size_t sig_der_len;
+	bool ok;
+
+	assert(in < psbt->num_inputs);
+
+	/* we serialize the compressed version of the key, wally likes this */
+	pubkey_to_der(pk_der, pubkey);
+	tal_wally_start();
+	wally_psbt_input_set_sighash(&psbt->inputs[in], sig->sighash_type);
+
+	if (wally_ec_sig_to_der(sig->s.data, sizeof(sig->s.data), sig_der,
+				sizeof(sig_der), &sig_der_len))
+		return false;
+
+	sig_der[sig_der_len++] = sig->sighash_type;
+
+	ok = wally_psbt_input_add_signature(&psbt->inputs[in],
+					    pk_der, sizeof(pk_der),
+					    sig_der,
+					    sig_der_len) == WALLY_OK;
+	tal_wally_end(psbt);
+	return ok;
+}
+
 void psbt_input_set_wit_utxo(struct wally_psbt *psbt, size_t in,
 			     const u8 *scriptPubkey, struct amount_sat amt)
 {
