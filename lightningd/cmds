@@ -1,0 +1,60 @@
+cmds
+
+/*
+
+
+
+
+cd Development/lightningTwo
+
+stop_ln
+rm -rf "$PATH_TO_BITCOIN"
+
+
+
+stop_ln
+rm -rf /tmp/l1-regtest/ /tmp/l2-regtest/
+make -j4
+source contrib/startup_regtest.sh
+start_ln
+sleep 2
+fund_nodes
+PEER_ID=`l1-cli listpeers | jq -r .peers[0].id`
+PSBT=`l1-cli splice_init $PEER_ID | jq -r .psbt`
+PSBT_FUNDS=`l1-cli fundpsbt 100000sat slow 166 | jq -r .psbt`
+PSBT=`bt-cli joinpsbts "[\"$PSBT\", \"$PSBT_FUNDS\"]"`
+PSBT=`l1-cli splice_update $PEER_ID $PSBT | jq -r .psbt`
+PSBT=`l1-cli splice_finalize $PEER_ID | jq -r .psbt`
+PSBT=`l1-cli signpsbt -k psbt="$PSBT" | jq -r .signed_psbt`
+TX=`l1-cli splice_signed $PEER_ID $PSBT | jq -r .tx`
+bt-cli sendrawtransaction $TX
+
+
+	reset:
+
+stop_ln
+rm -rf /tmp/l1-regtest/ /tmp/l2-regtest/ && rm -rf "$PATH_TO_BITCOIN"
+
+
+
+	attach debugger to channeld 1, 2:
+
+lldb -p `ps -A | grep [/]lightning_channeld | awk '{print $1;}' | head -1 | tail -1` --one-line c
+
+	attach debugger to channeld 2:
+
+lldb -p `ps -A | grep [/]lightning_channeld | awk '{print $1;}' | head -2 | tail -1` --one-line c
+
+
+
+
+
+
+
+
+
+
+
+
+
+*/
