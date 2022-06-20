@@ -163,6 +163,7 @@ static void handle_splice_confirmed_init(struct lightningd *ld,
 		was_pending(command_success(cc->cmd, response));
 
 		list_del(&cc->list);
+		tal_free(cc);
 	}
 }
 
@@ -196,6 +197,7 @@ static void handle_splice_confirmed_update(struct lightningd *ld,
 		was_pending(command_success(cc->cmd, response));
 
 		list_del(&cc->list);
+		tal_free(cc);
 	}
 }
 
@@ -248,6 +250,7 @@ static void handle_splice_confirmed_finalize(struct lightningd *ld,
 		was_pending(command_success(cc->cmd, response));
 
 		list_del(&cc->list);
+		tal_free(cc);
 	}
 }
 
@@ -278,6 +281,7 @@ static void handle_splice_confirmed_signed(struct lightningd *ld,
 		was_pending(command_success(cc->cmd, response));
 
 		list_del(&cc->list);
+		tal_free(cc);
 	}
 }
 
@@ -1434,6 +1438,8 @@ static struct command_result *json_splice_init(struct command *cmd,
 		return command_fail(cmd, FUNDING_UNKNOWN_PEER, "Unknown peer");
 	}
 
+	//TODO: Make this work with multiple channels per peer
+
 	channel = peer_active_channel(peer);
 	if (!channel) {
 		return command_fail(cmd, LIGHTNINGD, "Peer is not active, state: %s",
@@ -1647,6 +1653,7 @@ static const struct json_command splice_update_command = {
 };
 AUTODATA(json_command, &splice_update_command);
 
+// TODO: Remove splice_finalize. Instead it's done as a splice_update call with no updates.
 static const struct json_command splice_finalize_command = {
 	"splice_finalize",
 	"channels",

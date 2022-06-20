@@ -247,6 +247,45 @@ fund_nodes() {
 	done
 }
 
+splice() {
+
+	stop_ln
+	pkill lightningd
+	pkill bitcoind
+	pkill lightning_channeld
+	sleep 1
+	pkill -9 lightningd
+	pkill -9 lightning_channeld
+	rm -rf /tmp/l1-regtest/ /tmp/l2-regtest/
+
+	btcli='bitcoin-cli -regtest'
+	l1cli="$LCLI"" --lightning-dir=/tmp/l1-regtest"
+
+	make -j12
+	start_ln
+
+	sleep 1
+
+	fund_nodes
+
+	if [ -n "$1" ]; then
+		echo "Hit enter after done attaching debuggers"
+		read
+	fi
+
+	PEER_ID=`$l1cli listpeers | jq -r .peers[0].id`
+	PSBT=`$l1cli splice_init $PEER_ID | jq -r .psbt`
+	PSBT_FUNDS=`$l1cli fundpsbt 100000sat slow 166 | jq -r .psbt`
+	PSBT=`$btcli joinpsbts "[\"$PSBT\", \"$PSBT_FUNDS\"]"`
+	PSBT=`$l1cli splice_update $PEER_ID $PSBT | jq -r .psbt`
+	PSBT=`$l1cli splice_finalize $PEER_ID | jq -r .psbt`
+	PSBT=`$l1cli signpsbt -k psbt="$PSBT" | jq -r .signed_psbt`
+	TX=`$l1cli splice_signed $PEER_ID $PSBT | jq -r .tx`
+
+	echo "Sending splice TX to chain"
+	$btcli sendrawtransaction $TX
+}
+
 stop_nodes() {
 	if [ -z "$2" ]; then
 		network=regtest
