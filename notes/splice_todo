@@ -8,6 +8,7 @@
 - audit memory usage ✅
 - tx_complete rcvd, validate splice tx as dual open does ✅
 - tx_complete rcvd, validate splice tx conforms to splice spec
+- make send_commitment work ✅
 - tx-sigs are exchanged... move out of stfu mode ✅
 -- (intiator side) ✅
 -- (ack side) ✅
@@ -18,8 +19,8 @@
 -- (initiator side)
 -- (ack side)
 - on reconnect, handle re-transmission of tx-sigs
-- normal channel operation; 
-	- every commit_sigs, send commitment signatures for splice tx as well
+- normal channel operation; ✅
+	- every commit_sigs, send commitment signatures for splice tx as well ✅
 	- bound the amount to route to the new splice amounts (min inprogress balance)
 - splice_locked sent + rcvd;
 	- clear out all inflight splice txs
