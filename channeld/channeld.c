@@ -167,9 +167,10 @@ struct peer {
 	struct msg_queue *update_queue;
 	/* Callback for when when stfu is negotiated successfully */
 	void (*on_stfu_success)(struct peer*);
-	/* If set, send_commit will resend all commitments */
-	// TODO: Rename this send htlc commitments for a given splice txid
-	bool resend_all_commitments;
+	/* The number of splices that have been signed & committed */
+	int committed_splice_count;
+	/* The number of splices that are active (awaiting confirmation) */
+	int splice_count;
 	/* Track how many of each tx collab msg we receive */
 	u16 tx_msg_count[INTERACTIVETX_NUM_TX_MSGS];
 	/* Current negoitated psbt */
@@ -1464,10 +1465,11 @@ static void send_commit(struct peer *peer)
 	 *   - MUST NOT send a `commitment_signed` message that does not include
 	 *     any updates.
 	 */
-	// Question: What are the exact spec rules for when we send the update
-	// anywy during a splice?
 	changed_htlcs = tal_arr(tmpctx, const struct htlc *, 0);
-	if (!channel_sending_commit(peer->channel, &changed_htlcs)) {
+
+	if (peer->committed_splice_count == peer->splice_count
+		&& !channel_sending_commit(peer->channel, &changed_htlcs)) {
+
 		status_debug("Can't send commit: nothing to send,"
 			     " feechange %s (%s)"
 			     " blockheight %s (%s)",
@@ -1487,7 +1489,7 @@ static void send_commit(struct peer *peer)
 			  &funding_wscript, peer->channel, &peer->remote_per_commit,
 			  peer->next_index[REMOTE], REMOTE);
 
-	// peer->resend_all_commitments = false;
+	peer->committed_splice_count = peer->splice_count;
 
 	htlc_sigs =
 	    calc_commitsigs(tmpctx, peer, txs, funding_wscript, htlc_map,
@@ -1503,6 +1505,93 @@ static void send_commit(struct peer *peer)
 	}  else
 		pbase = NULL;
 
+	/* Loop over current inflights
+	 * BOLT #2:
+	 *   MUST send a commitsigs for each splice in progress, in increasing feerate order.
+	 *
+	 * TODO: Sort updates by increasing feerate order
+	 */
+	for(u32 i = 0; peer->splice_count; i++) {
+
+		u8 *msg;
+		enum peer_wire type;
+		bool is_found;
+		struct bitcoin_outpoint outpoint;
+		u32 theirFeerate;
+		struct amount_sat funding_sats, our_funding_sats;
+		struct wally_psbt *psbt;
+
+		wire_sync_write(MASTER_FD,
+			        take(towire_channeld_get_inflight(tmpctx,
+							          i)));
+
+		assert(!(fcntl(MASTER_FD, F_GETFL) & O_NONBLOCK));
+
+		msg = wire_sync_read(tmpctx, MASTER_FD);
+
+		type = fromwire_peektype(msg);
+
+		if(type != WIRE_CHANNELD_GOT_INFLIGHT) {
+
+			peer_failed_err(peer->pps, &peer->channel_id,
+					"Channeld got incorrect message from "
+					"lightningd: %d "
+					"(should be WIRE_CHANNELD_GOT_INFLIGHT)", type);
+
+			break;
+		}
+
+		if (!fromwire_channeld_got_inflight(tmpctx,
+						    msg,
+						    &is_found,
+						    &outpoint.txid,
+						    &outpoint.n,
+						    &theirFeerate,
+						    &funding_sats,
+						    &our_funding_sats,
+						    &psbt)) {
+
+			peer_failed_err(peer->pps,
+					&peer->channel_id,
+					"Invalid 'got_inflight' mesage from daemon");
+		}
+
+		if(!is_found)
+			break;
+
+		txs = channel_splice_txs(tmpctx, &outpoint, funding_sats,
+				  &htlc_map, direct_outputs, &funding_wscript,
+				  peer->channel, &peer->remote_per_commit,
+				  peer->next_index[REMOTE], REMOTE);
+
+		int old_size = tal_count(cs_tlv->splice_commitsigs);
+
+		if(!old_size)
+			cs_tlv->splice_commitsigs = tal_arrz(tmpctx,
+							     struct commitsigs*,
+							     1);
+		else
+			tal_resize(&cs_tlv->splice_commitsigs, old_size + 1);
+
+		cs_tlv->splice_commitsigs[old_size] = tal(tmpctx, struct commitsigs);
+
+		htlc_sigs =
+		    calc_commitsigs(tmpctx, peer, txs, funding_wscript, htlc_map,
+				    peer->next_index[REMOTE],
+				    &commit_sig);
+
+		struct commitsigs *commitsigs = cs_tlv->splice_commitsigs[old_size];
+
+		commitsigs->commit_signature = commit_sig.s;
+
+		commitsigs->htlc_signature = tal_arrz(tmpctx,
+						     secp256k1_ecdsa_signature,
+						     tal_count(htlc_sigs));
+
+		for(int j = 0; j < tal_count(htlc_sigs); j++)
+			commitsigs->htlc_signature[j] = htlc_sigs[j].s;
+	}
+
 #if DEVELOPER
 	if (peer->dev_disable_commit) {
 		(*peer->dev_disable_commit)--;
@@ -1510,6 +1599,8 @@ static void send_commit(struct peer *peer)
 			status_unusual("dev-disable-commit-after: disabling");
 	}
 #endif
+
+	// TODO: do we need another one of these calls for each active splice?
 
 	status_debug("Telling master we're about to commit...");
 	/* Tell master to save this next commit to database, then wait. */
@@ -1742,7 +1833,8 @@ static void handle_peer_commit_sig(struct peer *peer, const u8 *msg)
 	//TODO: Check below should check if a splice is being sent and not error out
 
 	changed_htlcs = tal_arr(msg, const struct htlc *, 0);
-	if (!channel_rcvd_commit(peer->channel, &changed_htlcs)) {
+	if (!peer->splice_count
+	    && !channel_rcvd_commit(peer->channel, &changed_htlcs)) {
 		/* BOLT #2:
 		 *
 		 * A sending node:
@@ -2054,7 +2146,7 @@ static void handle_peer_revoke_and_ack(struct peer *peer, const u8 *msg)
 				    &peer->old_remote_per_commit));
 
 	/* We may now be quiescent on our side. */
-	maybe_send_stfu(peer);
+	// maybe_send_stfu(peer);
 
 	start_commit_timer(peer);
 }
@@ -2401,8 +2493,23 @@ static void interactive_send_commitments(struct peer *peer,
 	const u8 *msg;
 	enum peer_wire type;
 
-	if(do_i_sign_first(peer, ictx))
+	if(do_i_sign_first(peer, ictx)) {
+
 		send_commit(peer);
+
+		msg = peer_read(tmpctx, peer->pps);
+
+		type = fromwire_peektype(msg);
+
+		if(type != WIRE_REVOKE_AND_ACK) {
+
+			peer_failed_warn(peer->pps, &peer->channel_id,
+					"Splicing got incorrect message from peer: %d "
+					"(should be WIRE_REVOKE_AND_ACK)", type);
+		}
+
+		handle_peer_revoke_and_ack(peer, msg);
+	}
 
 	msg = peer_read(tmpctx, peer->pps);
 
@@ -2417,8 +2524,23 @@ static void interactive_send_commitments(struct peer *peer,
 
 	handle_peer_commit_sig(peer, msg);
 
-	if(!do_i_sign_first(peer, ictx))
+	if(!do_i_sign_first(peer, ictx)) {
+
 		send_commit(peer);
+
+		msg = peer_read(tmpctx, peer->pps);
+
+		type = fromwire_peektype(msg);
+
+		if(type != WIRE_REVOKE_AND_ACK) {
+
+			peer_failed_warn(peer->pps, &peer->channel_id,
+					"Splicing got incorrect message from peer: %d "
+					"(should be WIRE_REVOKE_AND_ACK)", type);
+		}
+
+		handle_peer_revoke_and_ack(peer, msg);
+	}
 }
 
 static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
@@ -2466,8 +2588,6 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 		peer_failed_err(peer->pps, &peer->channel_id,
 				"Interactive splicing error: %s", error);
 	}
-
-	interactive_send_commitments(peer, &ictx);
 
 	psbt_sort_by_serial_id(ictx.current_psbt);
 
@@ -2544,6 +2664,10 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 						     funding_sats,
 						     our_funding_sats,
 						     ictx.current_psbt));
+
+	peer->splice_count++;
+
+	interactive_send_commitments(peer, &ictx);
 
 	msg = peer_read(tmpctx, peer->pps);
 
@@ -2857,8 +2981,6 @@ static void handle_splice_finalize(struct peer *peer, const u8 *inmsg)
 		peer_failed_warn(peer->pps, &peer->channel_id,
 				 "Splice finalize error: %s", error);
 
-	interactive_send_commitments(peer, &ictx);
-
 	psbt_add_serials(ictx.current_psbt, ictx.our_role);
 	psbt_sort_by_serial_id(ictx.current_psbt);
 
@@ -2967,9 +3089,13 @@ static void handle_splice_signed(struct peer *peer, const u8 *inmsg)
 						     our_funding_sats,
 						     signed_psbt));
 
-	// peer->resend_all_commitments = true;
+	peer->splice_count++;
 
-	send_commit(peer);
+	struct interactivetx_context ictx;
+
+	ictx.our_role = TX_INITIATOR;
+
+	interactive_send_commitments(peer, &ictx);
 
 	struct bitcoin_tx *bitcoin_tx;
 	struct bitcoin_signature splice_sig;
