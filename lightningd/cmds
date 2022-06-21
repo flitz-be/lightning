@@ -11,6 +11,13 @@ stop_ln
 rm -rf "$PATH_TO_BITCOIN"
 
 
+stop_ln
+pkill lightningd
+pkill bitcoind
+pkill lightning_channeld
+sleep 1
+pkill -9 lightningd
+pkill -9 lightning_channeld
 
 stop_ln
 rm -rf /tmp/l1-regtest/ /tmp/l2-regtest/
@@ -20,12 +27,15 @@ start_ln
 sleep 2
 fund_nodes
 PEER_ID=`l1-cli listpeers | jq -r .peers[0].id`
+INVOICE=`l2-cli invoice 10000 test1 test1 | jq -r .bolt11`
+l1-cli pay $INVOICE | jq -r .status
 PSBT=`l1-cli splice_init $PEER_ID | jq -r .psbt`
 PSBT_FUNDS=`l1-cli fundpsbt 100000sat slow 166 | jq -r .psbt`
 PSBT=`bt-cli joinpsbts "[\"$PSBT\", \"$PSBT_FUNDS\"]"`
 PSBT=`l1-cli splice_update $PEER_ID $PSBT | jq -r .psbt`
 PSBT=`l1-cli splice_finalize $PEER_ID | jq -r .psbt`
 PSBT=`l1-cli signpsbt -k psbt="$PSBT" | jq -r .signed_psbt`
+# l1-cli splice_signed $PEER_ID $PSBT
 TX=`l1-cli splice_signed $PEER_ID $PSBT | jq -r .tx`
 bt-cli sendrawtransaction $TX
 
@@ -34,6 +44,10 @@ bt-cli sendrawtransaction $TX
 
 stop_ln
 rm -rf /tmp/l1-regtest/ /tmp/l2-regtest/ && rm -rf "$PATH_TO_BITCOIN"
+
+
+INVOICE=`l2-cli invoice 10000 test1 test1 | jq -r .bolt11`
+l1-cli pay $INVOICE | jq -r .status
 
 
 
