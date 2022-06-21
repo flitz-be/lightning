@@ -76,6 +76,17 @@ struct bitcoin_tx **channel_txs(const tal_t *ctx,
 				u64 commitment_number,
 				enum side side);
 
+struct bitcoin_tx **channel_splice_txs(const tal_t *ctx,
+				       const struct bitcoin_outpoint *funding,
+				       struct amount_sat funding_sats,
+				       const struct htlc ***htlcmap,
+				       struct wally_tx_output *direct_outputs[NUM_SIDES],
+				       const u8 **funding_wscript,
+				       const struct channel *channel,
+				       const struct pubkey *per_commitment_point,
+				       u64 commitment_number,
+				       enum side side);
+
 /**
  * actual_feerate: what is the actual feerate for the local side.
  * @channel: The channel state
@@ -231,9 +242,11 @@ bool channel_sending_commit(struct channel *channel,
  * @htlcs: initially-empty tal_arr() for htlcs which changed state.
  *
  * This is where we commit to pending changes we've added; returns true if
- * anything changed for the remote side (if not, don't send!) */
+ * anything changed for the remote side (if not, don't send!) or commit_all
+ * is true */
 bool channel_sending_commit_all(struct channel *channel,
-                                const struct htlc ***htlcs);
+				const struct htlc ***htlcs,
+				bool commit_all);
 
 /**
  * channel_rcvd_revoke_and_ack: accept ack on remote committed changes.
