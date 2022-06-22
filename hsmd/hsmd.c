@@ -122,7 +122,7 @@ static struct io_plan *bad_req_fmt(struct io_conn *conn,
 	char *str;
 
 	va_start(ap, fmt);
-	str = tal_fmt(tmpctx, fmt, ap);
+	str = tal_vfmt(tmpctx, fmt, ap);
 	va_end(ap);
 
 	/*~ If the client was actually lightningd, it's Game Over; we actually
@@ -146,6 +146,8 @@ static struct io_plan *bad_req_fmt(struct io_conn *conn,
 								  &c->id,
 								  str,
 								  msg_in)));
+
+	abort();
 
 	/*~ The way ccan/io works is that you return the "plan" for what to do
 	 * next (eg. io_read).  io_close() is special: it means to close the

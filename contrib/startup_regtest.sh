@@ -85,7 +85,7 @@ start_nodes() {
 		# Node config
 		cat <<- EOF > "/tmp/l$i-$network/config"
 		network=$network
-		log-level=debug
+		log-level=io
 		log-file=/tmp/l$i-$network/log
 		addr=localhost:$socket
 		EOF
