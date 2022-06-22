@@ -318,8 +318,6 @@ static void handle_add_inflight(struct lightningd *ld,
 
 	struct bitcoin_tx *bitcoin_tx;
 
-	/* bitcoin_tx isnt the incorrect tx here, but we push it for now 
-	 * to prevent crashes from code that depends on there being one */
 	bitcoin_tx = bitcoin_tx_with_psbt(tmpctx, psbt);
 
 	inflight = new_inflight(channel,
@@ -749,6 +747,10 @@ static void handle_channel_get_inflight(struct channel *channel,
 				       tal_hex(tmpctx, msg));
 		return;
 	}
+
+	
+
+	todo: actually load the inflight stuff from db!
 
 	struct bitcoin_outpoint outpoint;
 	u32 theirFeerate = 0;
