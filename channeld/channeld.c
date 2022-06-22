@@ -1492,6 +1492,14 @@ static void send_commit(struct peer *peer)
 		return;
 	}
 
+	char buf[2048];
+
+	sprintf(buf, "channel_txs txid: %s\n", tal_hexstr(tmpctx,
+							   &peer->channel->funding.txid,
+							   sizeof(peer->channel->funding.txid)));
+
+	DLOG(buf);
+
 	txs = channel_txs(tmpctx, &htlc_map, direct_outputs,
 			  &funding_wscript, peer->channel, &peer->remote_per_commit,
 			  peer->next_index[REMOTE], REMOTE);
@@ -1527,6 +1535,10 @@ static void send_commit(struct peer *peer)
 		u32 theirFeerate;
 		struct amount_sat funding_sats, our_funding_sats;
 		struct wally_psbt *psbt;
+		struct bitcoin_tx **splice_txs;
+		struct bitcoin_signature splice_commit_sig, *splice_htlc_sigs;
+		const struct htlc **splice_htlc_map;
+		struct wally_tx_output *splice_direct_outputs[NUM_SIDES];
 
 		wire_sync_write(MASTER_FD,
 			        take(towire_channeld_get_inflight(tmpctx,
@@ -1566,10 +1578,19 @@ static void send_commit(struct peer *peer)
 		if(!is_found)
 			break;
 
-		txs = channel_splice_txs(tmpctx, &outpoint, funding_sats,
-				  &htlc_map, direct_outputs, &funding_wscript,
-				  peer->channel, &peer->remote_per_commit,
-				  peer->next_index[REMOTE], REMOTE);
+		char buf[2048];
+
+		sprintf(buf, "channel_splice_txs txid: %s\n", tal_hexstr(tmpctx,
+									  &outpoint.txid,
+									  sizeof(outpoint.txid)));
+
+		DLOG(buf);
+
+		splice_txs = channel_splice_txs(tmpctx, &outpoint, funding_sats,
+					 &splice_htlc_map, splice_direct_outputs,
+					 &funding_wscript, peer->channel,
+					 &peer->remote_per_commit,
+					 peer->next_index[REMOTE], REMOTE);
 
 		int old_size = tal_count(cs_tlv->splice_commitsigs);
 
@@ -1582,21 +1603,21 @@ static void send_commit(struct peer *peer)
 
 		cs_tlv->splice_commitsigs[old_size] = tal(tmpctx, struct commitsigs);
 
-		htlc_sigs =
-		    calc_commitsigs(tmpctx, peer, txs, funding_wscript, htlc_map,
-				    peer->next_index[REMOTE],
-				    &commit_sig);
+		splice_htlc_sigs =
+		    calc_commitsigs(tmpctx, peer, splice_txs, funding_wscript,
+		    		    splice_htlc_map, peer->next_index[REMOTE],
+				    &splice_commit_sig);
 
 		struct commitsigs *commitsigs = cs_tlv->splice_commitsigs[old_size];
 
-		commitsigs->commit_signature = commit_sig.s;
+		commitsigs->commit_signature = splice_commit_sig.s;
 
 		commitsigs->htlc_signature = tal_arrz(tmpctx,
 						     secp256k1_ecdsa_signature,
-						     tal_count(htlc_sigs));
+						     tal_count(splice_htlc_sigs));
 
-		for(int j = 0; j < tal_count(htlc_sigs); j++)
-			commitsigs->htlc_signature[j] = htlc_sigs[j].s;
+		for(int j = 0; j < tal_count(splice_htlc_sigs); j++)
+			commitsigs->htlc_signature[j] = splice_htlc_sigs[j].s;
 	}
 
 #if DEVELOPER
@@ -2648,6 +2669,11 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 
 	psbt_elements_normalize_fees(ictx.current_psbt);
 
+	struct amount_sat funding_sats, our_funding_sats;
+
+	funding_sats.satoshis = newChanOutpoint->satoshi;
+	our_funding_sats.satoshis = 0;
+
 	struct bitcoin_outpoint outpoint;
 
 	psbt_txid(tmpctx, ictx.current_psbt, &outpoint.txid, NULL);
@@ -2656,10 +2682,14 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 	/* Todo find output index using redeem script & validate there
 	 * is only one */
 
-	struct amount_sat funding_sats, our_funding_sats;
 
-	funding_sats.satoshis = newChanOutpoint->satoshi;
-	our_funding_sats.satoshis = 0;
+	char buf[2048];
+
+	sprintf(buf, "accepter outpoint txid: %s\n", tal_hexstr(tmpctx,
+							   &outpoint.txid,
+							   sizeof(outpoint.txid)));
+
+	DLOG(buf);
 
 	u32 theirFeerate = channel_feerate(peer->channel, REMOTE);
 
@@ -3086,6 +3116,14 @@ static void handle_splice_signed(struct peer *peer, const u8 *inmsg)
 
 	funding_sats.satoshis = newChanOutpoint->satoshi;
 	our_funding_sats.satoshis = 0; /* <- todo */
+
+	char buf[2048];
+
+	sprintf(buf, "intiator outpoint txid: %s\n", tal_hexstr(tmpctx,
+							   &outpoint.txid,
+							   sizeof(outpoint.txid)));
+
+	DLOG(buf);
 
 	wire_sync_write(MASTER_FD,
 			towire_channeld_add_inflight(tmpctx,

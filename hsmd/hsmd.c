@@ -147,6 +147,8 @@ static struct io_plan *bad_req_fmt(struct io_conn *conn,
 								  str,
 								  msg_in)));
 
+	abort();
+
 	/*~ The way ccan/io works is that you return the "plan" for what to do
 	 * next (eg. io_read).  io_close() is special: it means to close the
 	 * connection. */
