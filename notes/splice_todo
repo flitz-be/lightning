@@ -18,6 +18,7 @@
 - broadcast signed splice tx
 -- (initiator side)
 -- (ack side)
+- add the splice into the inflights ✅
 - on reconnect, handle re-transmission of tx-sigs
 - normal channel operation; ✅
 	- every commit_sigs, send commitment signatures for splice tx as well ✅
