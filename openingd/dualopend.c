@@ -902,11 +902,13 @@ static u8 *psbt_to_tx_sigs_msg(const tal_t *ctx,
 {
 	const struct witness_stack **ws =
 		psbt_to_witness_stacks(tmpctx, psbt,
-				       state->our_role);
+				       state->our_role,
+				       -1);
 
 	return towire_tx_signatures(ctx, &state->channel_id,
 				    &state->tx_state->funding.txid,
-				    ws);
+				    ws,
+				    NULL);
 }
 
 static void handle_tx_sigs(struct state *state, const u8 *msg)
@@ -919,10 +921,13 @@ static void handle_tx_sigs(struct state *state, const u8 *msg)
 	enum tx_role their_role = state->our_role == TX_INITIATOR ?
 		TX_ACCEPTER : TX_INITIATOR;
 
+	struct tlv_txsigs_tlvs *txsig_tlvs = tlv_txsigs_tlvs_new(tmpctx);
+
 	if (!fromwire_tx_signatures(tmpctx, msg, &cid, &txid,
 				    cast_const3(
 					 struct witness_stack ***,
-					 &ws)))
+					 &ws),
+				    txsig_tlvs))
 		open_err_fatal(state, "Bad tx_signatures %s",
 			       tal_hex(msg, msg));
 
