@@ -289,10 +289,14 @@ splice() {
 	PSBT=`$l1cli splice_update $PEER_ID $PSBT | jq -r .psbt`
 	PSBT=`$l1cli splice_finalize $PEER_ID | jq -r .psbt`
 	PSBT=`$l1cli signpsbt -k psbt="$PSBT" | jq -r .signed_psbt`
-	TX=`$l1cli splice_signed $PEER_ID $PSBT | jq -r .tx`
+	$l1cli splice_signed $PEER_ID $PSBT
 
-	echo "Sending splice TX to chain"
-	$btcli sendrawtransaction $TX
+	echo "Transactions in mempool:"
+
+	$btcli getrawmempool
+
+	# echo "Sending splice TX to chain"
+	# $btcli sendrawtransaction $TX
 }
 
 stop_nodes() {
