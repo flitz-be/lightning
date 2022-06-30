@@ -18,13 +18,15 @@
 - broadcast signed splice tx ✅
 -- (initiator side) ✅
 -- (ack side) ✅
+- detect onchain confirmation of splice
+-- make sure existing close detection doesnt break
 - handle broadcast sending splice tx to chain errors gracefully (see dualopen)
 - add the splice into the inflights ✅
 - on reconnect, handle re-transmission of tx-sigs
 - normal channel operation; ✅
 	- every commit_sigs, send commitment signatures for splice tx as well ✅
 	- bound the amount to route to the new splice amounts (min inprogress balance)
-- splice_locked sent + rcvd;
+- (on tx confirm + 6 blocks) splice_locked sent + rcvd;
 	- clear out all inflight splice txs
 	- delete all commitment_sig data related to it
 	- update funding tx to be new thing whatever
