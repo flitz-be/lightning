@@ -143,8 +143,6 @@ new_inflight(struct channel *channel,
 	struct funding_info *funding
 		= tal(inflight, struct funding_info);
 
-	WE NEED TO ADD SPLICING INFLIGHT TYPE THINGS HERE OMG OMG OMG I GET IT NOW
-
 	funding->outpoint = *funding_outpoint;
 	funding->total_funds = total_funds;
 	funding->feerate = funding_feerate;

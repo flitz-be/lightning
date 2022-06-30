@@ -40,6 +40,9 @@ TX=`l1-cli splice_signed $PEER_ID $PSBT | jq -r .tx`
 bt-cli sendrawtransaction $TX
 
 
+
+pkill lldb
+
 	reset:
 
 stop_ln

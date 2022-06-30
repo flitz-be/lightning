@@ -33,6 +33,8 @@ struct splice_command {
 	struct command *cmd;
 	/* Channel being closed. */
 	struct channel *channel;
+	/* The final tx to be broadcast */
+	const struct bitcoin_tx *final_tx;
 };
 
 static void update_feerates(struct lightningd *ld, struct channel *channel)
@@ -254,6 +256,81 @@ static void handle_splice_confirmed_finalize(struct lightningd *ld,
 	}
 }
 
+static void send_splice_tx_done(struct bitcoind *bitcoind UNUSED,
+			     bool success, const char *msg,
+			     struct splice_command *cc)
+{
+	struct json_stream *response;
+	struct bitcoin_txid txid;
+	u8 *tx_bytes;
+
+	if(!cc)
+		return;
+
+	tx_bytes = linearize_tx(tmpctx, cc->final_tx);
+	bitcoin_txid(cc->final_tx, &txid);
+
+	response = json_stream_success(cc->cmd);
+	json_add_string(response, "message", "Splice confirmed");
+	json_add_hex(response, "tx", tx_bytes, tal_bytelen(tx_bytes));
+	json_add_txid(response, "txid", &txid);
+
+	was_pending(command_success(cc->cmd, response));
+
+	list_del(&cc->list);
+	tal_free(cc);
+}
+
+
+static void send_splice_tx(struct channel *channel,
+			   const struct bitcoin_tx *tx,
+			   struct splice_command *cc)
+{
+	struct lightningd *ld = channel->peer->ld;
+
+	// if (taken(tx))
+	// 	cs->tx = tal_steal(cs, tx);
+	// else {
+	// 	tal_wally_start();
+	// 	wally_tx_clone_alloc(wtx, 0,
+	// 			     cast_const2(struct wally_tx **,
+	// 					 &cs->wtx));
+	// 	tal_wally_end(tal_steal(cs, cs->wtx));
+	// }
+
+	if (cc)
+		cc->final_tx = tal_steal(cc, tx);
+
+	u8* tx_bytes = linearize_tx(tmpctx, tx);
+
+	log_debug(channel->log,
+		  "Broadcasting funding tx %s for channel %s.",
+		  tal_hex(tmpctx, tx_bytes),
+		  type_to_string(tmpctx, struct channel_id, &channel->cid));
+
+	if(!cc) {
+		bitcoind_sendrawtx(ld->topology->bitcoind,
+			   tal_hex(tmpctx, tx_bytes),
+			   send_splice_tx_done, cc);
+	}
+	else if(1) {
+
+		struct bitcoin_txid txid;
+		bitcoin_txid(tx, &txid);
+
+		struct json_stream *response;
+		response = json_stream_success(cc->cmd);
+		json_add_string(response, "message", "Splice test without publishing");
+		json_add_hex(response, "tx", tx_bytes, tal_bytelen(tx_bytes));
+		json_add_txid(response, "txid", &txid);
+
+		was_pending(command_success(cc->cmd, response));
+
+		list_del(&cc->list);
+		tal_free(cc);
+	}
+}
+
 static void handle_splice_confirmed_signed(struct lightningd *ld,
 					   struct channel *channel,
 					   const u8 *msg)
@@ -262,7 +339,7 @@ static void handle_splice_confirmed_signed(struct lightningd *ld,
 	struct splice_command *n;
 	struct bitcoin_tx *tx;
 
-	if(!fromwire_channeld_splice_confirmed_signed(tmpctx, msg, &tx)) {
+	if (!fromwire_channeld_splice_confirmed_signed(tmpctx, msg, &tx)) {
 
 		channel_internal_error(channel,
 				       "bad splice_confirmed_init %s",
@@ -270,19 +347,21 @@ static void handle_splice_confirmed_signed(struct lightningd *ld,
 		return;
 	}
 
+	int splice_command_count = 0;
+
 	list_for_each_safe(&ld->splice_commands, cc, n, list) {
 
-		u8* ptr = linearize_tx(tmpctx, tx);
-		
-		struct json_stream *response = json_stream_success(cc->cmd);
-		json_add_string(response, "message", "Splice confirmed");
-		json_add_hex(response, "tx", ptr, tal_bytelen(ptr));
+		//TODO: Think through multiple inflight splice commands at once
 
-		was_pending(command_success(cc->cmd, response));
+		splice_command_count++;
 
-		list_del(&cc->list);
-		tal_free(cc);
+		send_splice_tx(channel, tx, cc);
 	}
+
+	/* If we get here it's because we received a splice from a peer */
+
+	if (!splice_command_count)
+		send_splice_tx(channel, tx, NULL);
 }
 
 static void handle_add_inflight(struct lightningd *ld,
@@ -748,9 +827,24 @@ static void handle_channel_get_inflight(struct channel *channel,
 		return;
 	}
 
-	
+	list_for_each(&channel->inflights, inflight, list) {
 
-	todo: actually load the inflight stuff from db!
+		if(i == index) {
+
+			outMsg = towire_channeld_got_inflight(NULL,
+							      true,
+							      &inflight->funding->outpoint.txid,
+							      inflight->funding->outpoint.n,
+							      inflight->funding->feerate,
+							      inflight->funding->total_funds,
+							      inflight->funding->our_funds,
+							      inflight->funding_psbt);
+
+			subd_send_msg(channel->owner, take(outMsg));
+
+			return;
+		}
+	}
 
 	struct bitcoin_outpoint outpoint;
 	u32 theirFeerate = 0;
@@ -763,27 +857,6 @@ static void handle_channel_get_inflight(struct channel *channel,
 
 	memset(&outpoint.txid, 0, sizeof(outpoint.txid));
 	outpoint.n = 0;
-
-	list_for_each(&channel->inflights, inflight, list) {
-
-		if(i == index) {
-
-			// TODO: Fill in the rest of inflight data
-
-			outMsg = towire_channeld_got_inflight(NULL,
-							      true,
-							      &outpoint.txid,
-							      outpoint.n,
-							      theirFeerate,
-							      funding_sats,
-							      our_funding_sats,
-							      inflight->funding_psbt);
-
-			subd_send_msg(channel->owner, take(outMsg));
-
-			return;
-		}
-	}
 
 	outMsg = towire_channeld_got_inflight(NULL,
 					      false,
