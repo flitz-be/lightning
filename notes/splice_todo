@@ -15,9 +15,9 @@
 - confirm signed splice tx sigs are valid ✅
 -- (intiator side) ✅
 -- (ack side) ✅
-- broadcast signed splice tx
+- broadcast signed splice tx ✅
 -- (initiator side) ✅
--- (ack side)
+-- (ack side) ✅
 - handle broadcast sending splice tx errors gracefully
 - add the splice into the inflights ✅
 - on reconnect, handle re-transmission of tx-sigs
