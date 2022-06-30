@@ -18,7 +18,7 @@
 - broadcast signed splice tx ✅
 -- (initiator side) ✅
 -- (ack side) ✅
-- handle broadcast sending splice tx errors gracefully
+- handle broadcast sending splice tx to chain errors gracefully (see dualopen)
 - add the splice into the inflights ✅
 - on reconnect, handle re-transmission of tx-sigs
 - normal channel operation; ✅
