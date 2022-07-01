@@ -291,6 +291,8 @@ splice() {
 	PSBT=`$l1cli signpsbt -k psbt="$PSBT" | jq -r .signed_psbt`
 	$l1cli splice_signed $PEER_ID $PSBT
 
+	sleep 1
+
 	echo "Transactions in mempool:"
 
 	$btcli getrawmempool
