@@ -2763,6 +2763,16 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 
 	struct tlv_txsigs_tlvs *tlv_txsigs_tlvs = tlv_txsigs_tlvs_new(tmpctx);
 
+	u8 funding_der[73];
+
+	size_t funding_der_len = signature_to_der(funding_der, &splice_sig);
+
+	tlv_txsigs_tlvs->funding_outpoint_sig = tal_dup_arr(tmpctx,
+							    u8,
+							    funding_der,
+							    funding_der_len,
+							    0);
+
 	sigmsg = towire_tx_signatures(tmpctx, &peer->channel_id,
 				      &outpoint.txid,
 				      (const struct witness_stack**)outws,
@@ -2804,10 +2814,6 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 	int final_sigs_cnt = 0;
 
 	if(1) {
-
-		/* For now we only accept signature for the original channel tx
-		 * and not for peer splice ins
-		 */
 
 		struct bitcoin_signature their_sig;
 
@@ -3404,20 +3410,15 @@ static void handle_splice_signed(struct peer *peer, const u8 *inmsg)
 	peer->stfu = false;
 	peer->stfu_sent[LOCAL] = peer->stfu_sent[REMOTE] = false;
 
-	assert(tal_count(ws) == 1);
-
-	for (int i = 0; i < tal_count(ws); i++) {
-
-		/* For now we only accept signature for the original channel tx
-		 * and not for peer splice ins
-		 */
+	if(1) {
 
 		struct bitcoin_signature their_sig;
+		int final_sigs_cnt;
 
 		their_sig.sighash_type = SIGHASH_ALL;
 
-		if (!signature_from_der(ws[i]->witness_element[0]->witness,
-				       tal_count(ws[i]->witness_element[0]->witness),
+		if (!signature_from_der(txsig_tlvs->funding_outpoint_sig,
+				       tal_count(txsig_tlvs->funding_outpoint_sig),
 				       &their_sig)) {
 
 			peer_failed_warn(peer->pps, &peer->channel_id,
@@ -3441,8 +3442,59 @@ static void handle_splice_signed(struct peer *peer, const u8 *inmsg)
 					 splice_funding_index,
 					 wit_script);
 
-		psbt_finalize_multisig_signatures(signed_psbt,
-						  &signed_psbt->inputs[splice_funding_index]);
+		sprintf(buf, "intiator going into finalize_multisig with sigs: %d",
+			(int)signed_psbt->inputs[splice_funding_index].signatures.num_items);
+
+		DLOG(buf);
+
+		final_sigs_cnt = psbt_finalize_multisig_signatures(signed_psbt,
+				&signed_psbt->inputs[splice_funding_index]);
+
+		sprintf(buf, "accepter side final_sigs_cnt: %d", final_sigs_cnt);
+
+		DLOG(buf);
+	}
+
+	if(0) {
+
+		for (int i = 0; i < tal_count(ws); i++) {
+
+			/* For now we only accept signature for the original channel tx
+			 * and not for peer splice ins
+			 */
+
+			struct bitcoin_signature their_sig;
+
+			their_sig.sighash_type = SIGHASH_ALL;
+
+			if (!signature_from_der(ws[i]->witness_element[0]->witness,
+					       tal_count(ws[i]->witness_element[0]->witness),
+					       &their_sig)) {
+
+				peer_failed_warn(peer->pps, &peer->channel_id,
+						 "Splicing bad tx_signatures %s",
+						 tal_hex(msg, msg));
+			}
+
+			struct pubkey *their_pubkey = &peer->channel->funding_pubkey[REMOTE];
+
+			/* Set the commit_sig on the commitment tx psbt */
+			if (!psbt_input_set_signature(signed_psbt,
+						      splice_funding_index,
+						      their_pubkey,
+						      &their_sig)) {
+
+				status_failed(STATUS_FAIL_INTERNAL_ERROR,
+					      "Unable to set signature internally");
+			}
+
+			psbt_input_set_witscript(signed_psbt,
+						 splice_funding_index,
+						 wit_script);
+
+			psbt_finalize_multisig_signatures(signed_psbt,
+							  &signed_psbt->inputs[splice_funding_index]);
+		}
 	}
 
 	if (!psbt_finalize(signed_psbt))
