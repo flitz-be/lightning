@@ -321,22 +321,11 @@ static void send_splice_tx_done(struct bitcoind *bitcoind UNUSED,
 	tal_free(info);
 }
 
-
 static void send_splice_tx(struct channel *channel,
 			   const struct bitcoin_tx *tx,
 			   struct splice_command *cc)
 {
 	struct lightningd *ld = channel->peer->ld;
-
-	// if (taken(tx))
-	// 	cs->tx = tal_steal(cs, tx);
-	// else {
-	// 	tal_wally_start();
-	// 	wally_tx_clone_alloc(wtx, 0,
-	// 			     cast_const2(struct wally_tx **,
-	// 					 &cs->wtx));
-	// 	tal_wally_end(tal_steal(cs, cs->wtx));
-	// }
 
 	u8* tx_bytes = linearize_tx(tmpctx, tx);
 
@@ -354,23 +343,6 @@ static void send_splice_tx(struct channel *channel,
 	bitcoind_sendrawtx(ld->topology->bitcoind,
 		   tal_hex(tmpctx, tx_bytes),
 		   send_splice_tx_done, info);
-
-	if(0) {
-
-		struct bitcoin_txid txid;
-		bitcoin_txid(tx, &txid);
-
-		struct json_stream *response;
-		response = json_stream_success(cc->cmd);
-		json_add_string(response, "message", "Splice test without publishing");
-		json_add_hex(response, "tx", tx_bytes, tal_bytelen(tx_bytes));
-		json_add_txid(response, "txid", &txid);
-
-		was_pending(command_success(cc->cmd, response));
-
-		list_del(&cc->list);
-		tal_free(cc);
-	}
 }
 
 static void handle_splice_confirmed_signed(struct lightningd *ld,
