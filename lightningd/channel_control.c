@@ -32,8 +32,6 @@ struct splice_command {
 	struct command *cmd;
 	/* Channel being closed. */
 	struct channel *channel;
-	/* The final tx to be broadcast */
-	const struct bitcoin_tx *final_tx;
 };
 
 static void update_feerates(struct lightningd *ld, struct channel *channel)
@@ -256,29 +254,71 @@ static void handle_splice_confirmed_finalize(struct lightningd *ld,
 	}
 }
 
-static void send_splice_tx_done(struct bitcoind *bitcoind UNUSED,
-			     bool success, const char *msg,
-			     struct splice_command *cc)
+struct send_splice_info
 {
+	struct splice_command *cc;
+	struct channel *channel;
+	const struct bitcoin_tx *final_tx;
+};
+
+static void send_splice_tx_done(struct bitcoind *bitcoind UNUSED,
+				bool success, const char *msg,
+				struct send_splice_info *info)
+{
+	struct splice_command *cc = info->cc;
+	struct lightningd *ld = info->channel->peer->ld;
 	struct json_stream *response;
 	struct bitcoin_txid txid;
+	struct amount_sat unused;
+	int num_utxos;
 	u8 *tx_bytes;
 
-	if(!cc)
+	if (!success) {
+		if (cc)
+			was_pending(command_fail(cc->cmd,
+						 SPLICE_BROADCAST_FAIL,
+						 "Error broadcasting splice "
+						 "tx: %s. Unsent tx discarded "
+						 "%s.",
+						 msg,
+						 type_to_string(tmpctx,
+								struct wally_tx,
+								info->final_tx->wtx)));
+		log_unusual(info->channel->log,
+			    "Error broadcasting splice "
+			    "tx: %s. Unsent tx discarded "
+			    "%s.",
+			    msg,
+			    type_to_string(tmpctx,
+			    		   struct wally_tx,
+			    		   info->final_tx->wtx));
+		tal_free(info);
 		return;
+	}
 
-	tx_bytes = linearize_tx(tmpctx, cc->final_tx);
-	bitcoin_txid(cc->final_tx, &txid);
+	/* This might have spent UTXOs from our wallet */
+	num_utxos = wallet_extract_owned_outputs(ld->wallet,
+						 info->final_tx->wtx, NULL,
+						 &unused);
+	if (num_utxos)
+		wallet_transaction_add(ld->wallet, info->final_tx->wtx, 0, 0);
 
-	response = json_stream_success(cc->cmd);
-	json_add_string(response, "message", "Splice confirmed");
-	json_add_hex(response, "tx", tx_bytes, tal_bytelen(tx_bytes));
-	json_add_txid(response, "txid", &txid);
+	if(cc) {
 
-	was_pending(command_success(cc->cmd, response));
+		tx_bytes = linearize_tx(tmpctx, info->final_tx);
+		bitcoin_txid(info->final_tx, &txid);
 
-	list_del(&cc->list);
-	tal_free(cc);
+		response = json_stream_success(cc->cmd);
+		json_add_string(response, "message", "Splice confirmed");
+		json_add_hex(response, "tx", tx_bytes, tal_bytelen(tx_bytes));
+		json_add_txid(response, "txid", &txid);
+
+		was_pending(command_success(cc->cmd, response));
+
+		list_del(&cc->list);
+	}
+
+	tal_free(info);
 }
 
 
@@ -298,9 +338,6 @@ static void send_splice_tx(struct channel *channel,
 	// 	tal_wally_end(tal_steal(cs, cs->wtx));
 	// }
 
-	if (cc)
-		cc->final_tx = tal_steal(cc, tx);
-
 	u8* tx_bytes = linearize_tx(tmpctx, tx);
 
 	log_debug(channel->log,
@@ -308,12 +345,17 @@ static void send_splice_tx(struct channel *channel,
 		  tal_hex(tmpctx, tx_bytes),
 		  type_to_string(tmpctx, struct channel_id, &channel->cid));
 
-	if(!cc) {
-		bitcoind_sendrawtx(ld->topology->bitcoind,
-			   tal_hex(tmpctx, tx_bytes),
-			   send_splice_tx_done, cc);
-	}
-	else if(1) {
+	struct send_splice_info *info = tal(NULL, struct send_splice_info);
+
+	info->cc = tal_steal(info, cc);
+	info->channel = channel;
+	info->final_tx = tal_steal(info, tx);
+
+	bitcoind_sendrawtx(ld->topology->bitcoind,
+		   tal_hex(tmpctx, tx_bytes),
+		   send_splice_tx_done, info);
+
+	if(0) {
 
 		struct bitcoin_txid txid;
 		bitcoin_txid(tx, &txid);
