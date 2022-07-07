@@ -8,6 +8,7 @@
 - audit memory usage ✅
 - tx_complete rcvd, validate splice tx as dual open does ✅
 - tx_complete rcvd, validate splice tx conforms to splice spec
+- bytes per side and calculate correct fee
 - make send_commitment work ✅
 - tx-sigs are exchanged... move out of stfu mode ✅
 -- (intiator side) ✅
