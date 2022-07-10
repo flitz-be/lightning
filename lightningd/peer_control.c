@@ -68,6 +68,16 @@
 #include <wire/onion_wire.h>
 #include <wire/wire_sync.h>
 
+static void DLOG(const char *str)
+{
+	int fd = open("/tmp/dustin.txt", O_CREAT|O_RDWR|O_APPEND);
+
+	write(fd, str, strlen(str));
+	write(fd, "\n", 1);
+
+	close(fd);
+}
+
 static void destroy_peer(struct peer *peer)
 {
 	list_del_from(&peer->ld->peers, &peer->list);
@@ -1021,6 +1031,7 @@ static void peer_connected_hook_final(struct peer_connected_hook_payload *payloa
 			return;
 		case CHANNELD_AWAITING_LOCKIN:
 		case CHANNELD_NORMAL:
+		case CHANNELD_AWAITING_SPLICE:
 		case CHANNELD_SHUTTING_DOWN:
 		case CLOSINGD_SIGEXCHANGE:
 			assert(!channel->owner);
@@ -1174,13 +1185,14 @@ static bool check_funding_details(const struct bitcoin_tx *tx,
 				  struct amount_sat funding,
 				  u32 funding_outnum)
 {
-	struct amount_asset asset =
-	    bitcoin_tx_output_get_amount(tx, funding_outnum);
-
-	if (!amount_asset_is_main(&asset))
-		return false;
+	struct amount_asset asset;
 
 	if (funding_outnum >= tx->wtx->num_outputs)
+		return false;
+
+	asset = bitcoin_tx_output_get_amount(tx, funding_outnum);
+
+	if (!amount_asset_is_main(&asset))
 		return false;
 
 	if (!amount_sat_eq(amount_asset_to_sat(&asset), funding))
@@ -1281,6 +1293,17 @@ static enum watch_result funding_depth_cb(struct lightningd *ld,
 		return DELETE_WATCH;
 	}
 
+	char buf[2048];
+
+	sprintf(buf, "funding_depth_cb with depth %d", (int)depth);
+
+	DLOG(buf);
+
+	// TODO: Handle the case where we get here with an inflight splice
+	// 1) Make the inflight *not* replace the existing tx until 6 confs
+	// 2) Current code just sets the last_sig to 0x0. Need to set that to the right thing
+	// 3) Make it go!
+
 	txidstr = type_to_string(tmpctx, struct bitcoin_txid, txid);
 	log_debug(channel->log, "Funding tx %s depth %u of %u",
 		  txidstr, depth, channel->minimum_depth);
@@ -1333,8 +1356,14 @@ static enum watch_result funding_depth_cb(struct lightningd *ld,
 			*channel->scid = scid;
 			wallet_channel_save(ld->wallet, channel);
 
-		} else if (!short_channel_id_eq(channel->scid, &scid)) {
-			/* This normally restarts channeld, initialized with updated scid
+		}
+		else if (false && channel->state != CHANNELD_AWAITING_SPLICE
+			&& !short_channel_id_eq(channel->scid, &scid)) {
+
+			/* TODO: This is firing after 6 depth splice */
+
+			/* During reorgs:
+			 * This normally restarts channeld, initialized with updated scid
 			 * and also adds it (at least our halve_chan) to rtable. */
 			channel_fail_reconnect(channel,
 					       "short_channel_id changed to %s (was %s)",
@@ -1367,10 +1396,29 @@ static enum watch_result funding_spent(struct channel *channel,
 				       const struct block *block)
 {
 	struct bitcoin_txid txid;
+	struct channel_inflight *inflight;
+
 	bitcoin_txid(tx, &txid);
 
 	wallet_channeltxs_add(channel->peer->ld->wallet, channel,
 			      WIRE_ONCHAIND_INIT, &txid, 0, block->height);
+
+	/* If we're doing a splice, we expect the funding transaction to be
+	 * spent, so don't freak out and just keep watching in that case */
+	list_for_each(&channel->inflights, inflight, list) {
+		if (bitcoin_txid_eq(&txid,
+				    &inflight->funding->outpoint.txid)) {
+
+			char buf[2048];
+
+			sprintf(buf, "Detected spending of funding into splice tx");
+
+			DLOG(buf);
+
+			return KEEP_WATCHING;
+		}
+	}
+
 	return onchaind_funding_spent(channel, tx, block->height);
 }
 
@@ -1396,9 +1444,9 @@ void channel_watch_funding(struct lightningd *ld, struct channel *channel)
 	channel_watch_wrong_funding(ld, channel);
 }
 
-static void channel_watch_inflight(struct lightningd *ld,
-				   struct channel *channel,
-				   struct channel_inflight *inflight)
+void channel_watch_inflight(struct lightningd *ld,
+			    struct channel *channel,
+			    struct channel_inflight *inflight)
 {
 	/* FIXME: Remove arg from cb? */
 	watch_txid(channel, ld->topology, channel,

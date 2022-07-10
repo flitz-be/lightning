@@ -168,6 +168,7 @@ static u8 *read_next_msg(const tal_t *ctx,
 		case WIRE_SHUTDOWN:
 		case WIRE_SPLICE:
 		case WIRE_SPLICE_ACK:
+		case WIRE_SPLICE_LOCKED:
 #if EXPERIMENTAL_FEATURES
 		case WIRE_STFU:
 #endif
@@ -670,6 +671,7 @@ char *process_interactivetx_updates(const tal_t *ctx,
 #if EXPERIMENTAL_FEATURES
 		case WIRE_SPLICE:
 		case WIRE_SPLICE_ACK:
+		case WIRE_SPLICE_LOCKED:
 		case WIRE_STFU:
 #endif
 			return tal_fmt(ctx, "Unexpected wire message %s",
