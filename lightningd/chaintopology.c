@@ -707,7 +707,7 @@ static void topo_update_spends(struct chain_topology *topo, struct block *b)
 	/* Retrieve all potential channel closes from the UTXO set and
 	 * tell gossipd about them. */
 	spent_scids =
-	    wallet_utxoset_get_spent(tmpctx, topo->ld->wallet, b->height - 12);
+	    wallet_utxoset_get_spent(tmpctx, topo->ld->wallet, b->height);
 
 	for (size_t i=0; i<tal_count(spent_scids); i++) {
 		gossipd_notify_spend(topo->bitcoind->ld, &spent_scids[i]);
