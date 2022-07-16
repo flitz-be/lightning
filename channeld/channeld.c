@@ -1586,7 +1586,7 @@ static void send_commit(struct peer *peer)
 	for (u32 i = 0; peer->splice_count; i++) {
 
 		u8 *msg;
-		enum peer_wire type;
+		enum channeld_wire type;
 		bool is_found;
 		struct bitcoin_outpoint outpoint;
 		u32 theirFeerate;
