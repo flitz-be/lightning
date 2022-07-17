@@ -2656,10 +2656,6 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 
 	peer_write(peer->pps, take(msg));
 
-	wit_script = bitcoin_redeem_2of2(ictx.desired_psbt,
-					 &peer->channel->funding_pubkey[1],
-					 &peer->channel->funding_pubkey[0]);
-
 	/* Now we wait for the other side to go first.
 	 *
 	 * BOLT #2:
@@ -2690,6 +2686,10 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 	}
 
 	psbt_sort_by_serial_id(ictx.current_psbt);
+
+	wit_script = bitcoin_redeem_2of2(ictx.current_psbt,
+					 &peer->channel->funding_pubkey[1],
+					 &peer->channel->funding_pubkey[0]);
 
 	for (int i = 0; i < ictx.current_psbt->num_inputs; i++) {
 
