@@ -744,7 +744,7 @@ static void json_add_channel(struct lightningd *ld,
 					    "local" : "remote");
 	if (channel->closer != NUM_SIDES)
 		json_add_string(response, "closer", channel->closer == LOCAL ?
-						    "local" : "remote");
+						    "local.69" : "remote.69");
 	else if (deprecated_apis)
 		json_add_null(response, "closer");
 
@@ -2042,6 +2042,7 @@ static struct command_result *json_setchannelfee(struct command *cmd,
 
 	if (channel
 	    && channel->state != CHANNELD_NORMAL
+	    && channel->state != CHANNELD_AWAITING_SPLICE
 	    && channel->state != CHANNELD_AWAITING_LOCKIN
 	    && channel->state != DUALOPEND_AWAITING_LOCKIN)
 		return command_fail(cmd, LIGHTNINGD,
@@ -2060,6 +2061,7 @@ static struct command_result *json_setchannelfee(struct command *cmd,
 			if (!channel)
 				continue;
 			if (channel->state != CHANNELD_NORMAL &&
+			    channel->state != CHANNELD_AWAITING_SPLICE &&
 			    channel->state != CHANNELD_AWAITING_LOCKIN &&
 			    channel->state != DUALOPEND_AWAITING_LOCKIN)
 				continue;

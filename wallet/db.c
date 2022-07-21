@@ -869,6 +869,7 @@ static struct migration dbmigrations[] = {
      NULL},
     {SQL("ALTER TABLE channel_htlcs ADD fees_msat BIGINT DEFAULT 0"), NULL},
     {SQL("ALTER TABLE channel_funding_inflights ADD lease_fee BIGINT DEFAULT 0"), NULL},
+    // ADD THE ALTER TABLE COMMAND HERE
 };
 
 /**

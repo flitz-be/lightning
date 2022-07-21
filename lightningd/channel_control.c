@@ -306,7 +306,8 @@ static void send_splice_tx_done(struct bitcoind *bitcoind UNUSED,
 	bitcoin_outpoint.txid = txid;
 	bitcoin_outpoint.n = info->output_index;
 
-	derive_channel_id(&info->channel->cid, &bitcoin_outpoint);
+	//DTODO Set new channel id on confirmation
+	// derive_channel_id(&info->channel->cid, &bitcoin_outpoint);
 
 	/* This might have spent UTXOs from our wallet */
 	num_utxos = wallet_extract_owned_outputs(ld->wallet,
@@ -383,6 +384,51 @@ static void handle_splice_confirmed_signed(struct lightningd *ld,
 			  channel_state_name(channel));
 		return;
 	}
+
+	// todo here
+
+	// Todo try just filling in channel config values manually here, see dual_open_control.c
+	// for reference....
+
+	/* We need to update the channel reserve on the config */
+	// TODO: Get these details from channeld
+	// channel_update_reserve(channel,
+	// 		       &channel_info.their_config,
+	// 		       total_funding);
+
+	// TODO? see dual_open_control.c handle_commit_received
+	/*
+		if (!(inflight = wallet_commit_channel(ld, channel,
+						       remote_commit,
+						       &remote_commit_sig,
+						       &funding,
+						       total_funding,
+						       funding_ours,
+						       &channel_info,
+						       feerate_funding,
+						       feerate_commitment,
+						       oa->role == TX_INITIATOR ?
+								oa->our_upfront_shutdown_script :
+								local_upfront_shutdown_script,
+						       remote_upfront_shutdown_script,
+						       psbt,
+						       lease_blockheight_start,
+						       lease_expiry,
+						       lease_fee,
+						       lease_commit_sig,
+						       lease_chan_max_msat,
+						       lease_chan_max_ppt))) {
+			channel_internal_error(channel,
+					       "wallet_commit_channel failed"
+					       " (chan %s)",
+					       type_to_string(tmpctx,
+							      struct channel_id,
+							      &channel->cid));
+			channel->open_attempt
+				= tal_free(channel->open_attempt);
+			return;
+		}
+		*/
 
 	list_for_each_safe(&ld->splice_commands, cc, n, list) {
 		if(channel != cc->channel)
@@ -574,6 +620,9 @@ static void handle_peer_splice_locked(struct channel *channel, const u8 *msg)
 				       tal_hex(channel, msg));
 		return;
 	}
+
+	channel->channel_info.their_config.channel_reserve.satoshis = 10000;
+	channel->our_config.channel_reserve.satoshis = 10000;
 
 	update_per_commit_point(channel, &next_per_commitment_point);
 
@@ -1308,7 +1357,7 @@ bool channel_tell_depth(struct lightningd *ld,
 	subd_send_msg(channel->owner,
 		      take(towire_channeld_funding_depth(NULL, channel->scid,
 							 depth,
-							 channel->state & CHANNELD_AWAITING_SPLICE)));
+							 channel->state == CHANNELD_AWAITING_SPLICE)));
 
 	if (channel->remote_funding_locked
 	    && channel->state == CHANNELD_AWAITING_LOCKIN
@@ -1869,7 +1918,8 @@ static struct command_result *json_dev_feerate(struct command *cmd,
 		return command_fail(cmd, LIGHTNINGD, "Peer not connected");
 
 	channel = peer_active_channel(peer);
-	if (!channel || !channel->owner || channel->state != CHANNELD_NORMAL)
+	if (!channel || !channel->owner
+		|| (channel->state != CHANNELD_NORMAL && channel->state != CHANNELD_AWAITING_SPLICE))
 		return command_fail(cmd, LIGHTNINGD, "Peer bad state");
 
 	msg = towire_channeld_feerates(NULL, *feerate,
@@ -1927,7 +1977,8 @@ static struct command_result *json_dev_quiesce(struct command *cmd,
 		return command_fail(cmd, LIGHTNINGD, "Peer not connected");
 
 	channel = peer_active_channel(peer);
-	if (!channel || !channel->owner || channel->state != CHANNELD_NORMAL)
+	if (!channel || !channel->owner
+		|| (channel->state != CHANNELD_NORMAL && channel->state != CHANNELD_AWAITING_SPLICE))
 		return command_fail(cmd, LIGHTNINGD, "Peer bad state");
 
 	msg = towire_channeld_dev_quiesce(NULL);
