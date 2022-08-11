@@ -1161,7 +1161,8 @@ static struct command_result *listpeers_done(struct command *cmd,
 			/* gossipd will only consider things in state NORMAL
 			 * anyway; we don't need to exclude others. */
 			state = json_get_member(buf, chan, "state");
-			if (!json_tok_streq(buf, state, "CHANNELD_NORMAL"))
+			if (!json_tok_streq(buf, state, "CHANNELD_NORMAL")
+			    && !json_tok_streq(buf, state, "CHANNELD_AWAITING_SPLICE"))
 				continue;
 
 			json_to_msat(buf,

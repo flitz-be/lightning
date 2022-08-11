@@ -1125,7 +1125,7 @@ static int change_htlcs(struct channel *channel,
 	     h;
 	     h = htlc_map_next(channel->htlcs, &it)) {
 		for (i = 0; i < n_hstates; i++) {
-			if (h->state == htlc_states[i] || commit_all) {
+			if (h->state == htlc_states[i]) {
 				htlc_incstate(channel, h, sidechanged, owed);
 				dump_htlc(h, prefix);
 				htlc_arr_append(htlcs, h);
@@ -1159,7 +1159,7 @@ static int change_htlcs(struct channel *channel,
 				   ^ htlc_state_flags(htlc_states[i]+1));
 	}
 
-	return commit_all ? 0 : cflags;
+	return cflags;
 }
 
 /* FIXME: The sender's requirements are *implied* by this, not stated! */

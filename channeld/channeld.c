@@ -277,14 +277,24 @@ static struct amount_msat advertized_htlc_max(const struct channel *channel)
 }
 
 #if EXPERIMENTAL_FEATURES
+static void end_stfu_mode(struct peer *peer)
+{
+	peer->stfu = false;
+	peer->stfu_sent[LOCAL] = peer->stfu_sent[REMOTE] = false;
+	peer->on_stfu_success = NULL;
+
+	status_debug("Left STFU mode.");
+}
+
 static void maybe_send_stfu(struct peer *peer)
 {
-	if (!peer->stfu)
+	if (!peer->stfu) {
+		status_unusual("Attempted to STFU while already in STFU mode.");
 		return;
-
-	// if you're in stfu just return
+	}
 
 	if (!peer->stfu_sent[LOCAL] && !pending_updates(peer->channel, LOCAL, false)) {
+		status_debug("Sending peer that we want to STFU.");
 		u8 *msg = towire_stfu(NULL, &peer->channel_id,
 				      peer->stfu_initiator == LOCAL);
 		peer_write(peer->pps, take(msg));
@@ -292,7 +302,7 @@ static void maybe_send_stfu(struct peer *peer)
 	}
 
 	if (peer->stfu_sent[LOCAL] && peer->stfu_sent[REMOTE]) {
-		status_unusual("STFU complete: we are quiescent");
+		status_debug("STFU success");
 		wire_sync_write(MASTER_FD,
 				towire_channeld_dev_quiesce_reply(tmpctx));
 
@@ -301,6 +311,9 @@ static void maybe_send_stfu(struct peer *peer)
 			peer->on_stfu_success(peer);
 			peer->on_stfu_success = NULL;
 		}
+	}
+	else {
+		status_debug("STFU waiting for both sides to confirm");
 	}
 }
 
@@ -334,6 +347,7 @@ static void handle_stfu(struct peer *peer, const u8 *stfu)
 					 "Unsolicited STFU but you said"
 					 " you didn't initiate?");
 		peer->stfu_initiator = REMOTE;
+		status_debug("STFU intiator was remote.");
 	} else {
 		/* BOLT-quiescent #2:
 		 *
@@ -342,8 +356,14 @@ static void handle_stfu(struct peer *peer, const u8 *stfu)
 		 * arbitrarily considered to be the channel funder (the sender
 		 * of `open_channel`).
 		 */
-		if (remote_initiated)
+		if (remote_initiated) {
+			status_debug("Dual STFU intiation tiebreaker. Setting intiator to %s",
+				     peer->channel->opener == LOCAL ? "LOCAL" : "REMOTE");
 			peer->stfu_initiator = peer->channel->opener;
+		}
+		else {
+			status_debug("STFU intiator local.");
+		}
 	}
 
 	/* BOLT-quiescent #2:
@@ -1819,7 +1839,8 @@ static void send_revocation(struct peer *peer,
 			    const struct bitcoin_signature *commit_sig,
 			    const struct bitcoin_signature *htlc_sigs,
 			    const struct htlc **changed_htlcs,
-			    const struct bitcoin_tx *committx)
+			    const struct bitcoin_tx *committx,
+			    struct tlv_commitment_signed_tlvs *cs_tlv)
 {
 	struct changed_htlc *changed;
 	struct fulfilled_htlc *fulfilled;
@@ -1849,6 +1870,8 @@ static void send_revocation(struct peer *peer,
 		start_commit_timer(peer);
 	}
 
+	// TODO send all the commitsigs for the splicesssssss in progress
+
 	/* Tell master daemon about commitsig (and by implication, that we're
 	 * sending revoke_and_ack), then wait for it to ack. */
 	/* We had to do this after channel_sending_revoke_and_ack, since we
@@ -1863,7 +1886,8 @@ static void send_revocation(struct peer *peer,
 					       fulfilled,
 					       failed,
 					       changed,
-					       committx);
+					       committx,
+					       NULL); // <- DTODO
 	master_wait_sync_reply(tmpctx, peer, take(msg_for_master),
 			       WIRE_CHANNELD_GOT_COMMITSIG_REPLY);
 
@@ -1886,8 +1910,8 @@ static void handle_peer_commit_sig(struct peer *peer, const u8 *msg)
 	//TODO: Check below should check if a splice is being sent and not error out
 
 	changed_htlcs = tal_arr(msg, const struct htlc *, 0);
-	if (!peer->splice_count
-	    && !channel_rcvd_commit(peer->channel, &changed_htlcs)) {
+	if (!channel_rcvd_commit(peer->channel, &changed_htlcs)
+		&& !peer->splice_count) { // DTODO: Make this splice_count != confirmed_splice_count
 		/* BOLT #2:
 		 *
 		 * A sending node:
@@ -2025,10 +2049,7 @@ static void handle_peer_commit_sig(struct peer *peer, const u8 *msg)
 		     tal_count(htlc_sigs));
 
 	send_revocation(peer,
-			&commit_sig, htlc_sigs, changed_htlcs, txs[0]);
-
-	/* We may now be quiescent on our side. */
-	maybe_send_stfu(peer);
+			&commit_sig, htlc_sigs, changed_htlcs, txs[0], cs_tlv);
 
 	/* This might have synced the feerates: if so, we may want to
 	 * update */
@@ -2175,9 +2196,6 @@ static void handle_peer_revoke_and_ack(struct peer *peer, const u8 *msg)
 				    &peer->remote_per_commit),
 		     type_to_string(tmpctx, struct pubkey,
 				    &peer->old_remote_per_commit));
-
-	/* We may now be quiescent on our side. */
-	// maybe_send_stfu(peer);
 
 	start_commit_timer(peer);
 }
@@ -2757,9 +2775,6 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 							    der_len,
 							    0);
 
-	peer->stfu = false;
-	peer->stfu_sent[LOCAL] = peer->stfu_sent[REMOTE] = false;
-
 	struct tlv_txsigs_tlvs *tlv_txsigs_tlvs = tlv_txsigs_tlvs_new(tmpctx);
 
 	u8 funding_der[73];
@@ -2808,8 +2823,7 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 
 	DLOG(buf);
 
-	peer->stfu = false;
-	peer->stfu_sent[LOCAL] = peer->stfu_sent[REMOTE] = false;
+	end_stfu_mode(peer);
 
 	// assert(tal_count(inws) == 1);
 
@@ -3420,8 +3434,7 @@ static void handle_splice_signed(struct peer *peer, const u8 *inmsg)
 			    "Splicing bad tx_signatures %s",
 			    tal_hex(msg, msg));
 
-	peer->stfu = false;
-	peer->stfu_sent[LOCAL] = peer->stfu_sent[REMOTE] = false;
+	end_stfu_mode(peer);
 
 	if(1) {
 
@@ -5176,6 +5189,7 @@ static void init_channel(struct peer *peer)
 	struct channel_type *channel_type;
 	u32 *dev_disable_commit; /* Always NULL */
 	bool dev_fast_gossip;
+	u32 inflight_count;
 #if !DEVELOPER
 	bool dev_fail_process_onionpacket; /* Ignored */
 #endif
@@ -5241,9 +5255,13 @@ static void init_channel(struct peer *peer)
 				    &dev_disable_commit,
 				    &pbases,
 				    &reestablish_only,
-				    &peer->channel_update)) {
+				    &peer->channel_update,
+				    &inflight_count)) {
 		master_badmsg(WIRE_CHANNELD_INIT, msg);
 	}
+
+	peer->committed_splice_count = inflight_count;
+	peer->splice_count = inflight_count;
 
 #if DEVELOPER
 	peer->dev_disable_commit = dev_disable_commit;

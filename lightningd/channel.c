@@ -540,7 +540,8 @@ struct channel *peer_normal_channel(struct peer *peer)
 	struct channel *channel;
 
 	list_for_each(&peer->channels, channel, list) {
-		if (channel->state == CHANNELD_NORMAL)
+		if (channel->state == CHANNELD_NORMAL
+		    || channel->state == CHANNELD_AWAITING_SPLICE)
 			return channel;
 	}
 	return NULL;

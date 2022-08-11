@@ -38,6 +38,8 @@ CREATE TABLE channel_htlcs
 ALTER TABLE htlc_sigs ADD inflight_id BLOB REFERENCES channel_funding_inflights(funding_tx_id);
 ALTER TABLE channel_funding_inflights ADD starting_htlc_id INTEGER DEFAULT 0
 
+TODO: think about sorting channel_funding_inflights by feerate
+
 
 CREATE TABLE htlc_sigs
 (

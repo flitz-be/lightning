@@ -102,7 +102,7 @@ routehint_candidates(const tal_t *ctx,
 			continue;
 		}
 
-		/* Does it have a channel in state CHANNELD_NORMAL */
+		/* Does it have a channel in state CHANNELD_NORMAL or CHANNELD_AWAITING_SPLICE */
 		candidate.c = peer_normal_channel(peer);
 		if (!candidate.c) {
 			log_debug(ld->log, "%s: abnormal channel",
