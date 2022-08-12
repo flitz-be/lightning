@@ -675,7 +675,7 @@ static void handle_peer_splice_locked(struct peer *peer, const u8 *msg)
 
 	DLOG("Got handle_peer_splice_locked!!!");
 
-	peer->old_remote_per_commit = peer->remote_per_commit;
+	// peer->old_remote_per_commit = peer->remote_per_commit;
 	if (!fromwire_splice_locked(msg, &chanid,
 				    &peer->remote_per_commit))
 		peer_failed_warn(peer->pps, &peer->channel_id,
@@ -1957,7 +1957,7 @@ static void handle_peer_commit_sig(struct peer *peer, const u8 *msg)
 
 	changed_htlcs = tal_arr(msg, const struct htlc *, 0);
 	if (!channel_rcvd_commit(peer->channel, &changed_htlcs)
-		&& !peer->splice_count) { // DTODO: Make this splice_count != confirmed_splice_count
+		&& !peer->splice_count) { // peer->splice_count != peer->committed_splice_count
 		/* BOLT #2:
 		 *
 		 * A sending node:
