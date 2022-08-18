@@ -28,21 +28,35 @@ start_ln
 sleep 2
 fund_nodes
 PEER_ID=`l1-cli listpeers | jq -r .peers[0].id`
-DESCR=test1 && INVOICE=`l2-cli invoice 10000 $DESCR $DESCR | jq -r .bolt11` && l1-cli pay $INVOICE | jq -r .status
+
+INVOICE=`l2-cli invoice 10000 testpre testpre | jq -r .bolt11`
+l1-cli pay $INVOICE
+
 PSBT=`l1-cli splice_init $PEER_ID | jq -r .psbt`
-DESCR=test2 && INVOICE=`l2-cli invoice 10000 $DESCR $DESCR | jq -r .bolt11` && l1-cli pay $INVOICE | jq -r .status
 PSBT_FUNDS=`l1-cli fundpsbt 100000sat slow 166 | jq -r .psbt`
-DESCR=test3 && INVOICE=`l2-cli invoice 10000 $DESCR $DESCR | jq -r .bolt11` && l1-cli pay $INVOICE | jq -r .status
 PSBT=`bt-cli joinpsbts "[\"$PSBT\", \"$PSBT_FUNDS\"]"`
-DESCR=test4 && INVOICE=`l2-cli invoice 10000 $DESCR $DESCR | jq -r .bolt11` && l1-cli pay $INVOICE | jq -r .status
 PSBT=`l1-cli splice_update $PEER_ID $PSBT | jq -r .psbt`
-DESCR=test5 && INVOICE=`l2-cli invoice 10000 $DESCR $DESCR | jq -r .bolt11` && l1-cli pay $INVOICE | jq -r .status
 PSBT=`l1-cli splice_finalize $PEER_ID | jq -r .psbt`
 PSBT=`l1-cli signpsbt -k psbt="$PSBT" | jq -r .signed_psbt`
 l1-cli splice_signed $PEER_ID $PSBT
 # TX=`l1-cli splice_signed $PEER_ID $PSBT | jq -r .tx`
+
+
+
 INVOICE=`l2-cli invoice 10000 test2 test2 | jq -r .bolt11`
 l1-cli pay $INVOICE
+
+bt-cli generatetoaddress 6 $ADDRESS
+
+INVOICE=`l2-cli invoice 10000 test6blocks test6blocks | jq -r .bolt11`
+l1-cli pay $INVOICE
+
+bt-cli generatetoaddress 6 $ADDRESS
+
+INVOICE=`l2-cli invoice 10000 test12blocks test12blocks | jq -r .bolt11`
+l1-cli pay $INVOICE
+
+
 
 
 
@@ -54,8 +68,7 @@ pkill lldb
 stop_ln
 rm -rf /tmp/l1-regtest/ /tmp/l2-regtest/ && rm -rf "$PATH_TO_BITCOIN"
 
-INVOICE=`l2-cli invoice 10000 test2 test2 | jq -r .bolt11`
-l1-cli pay $INVOICE
+INVOICE=`l2-cli invoice 10000 test2 test2 | jq -r .bolt11` && l1-cli pay $INVOICE
 
 INVOICE=`l2-cli invoice 10000 test3 test3 | jq -r .bolt11`
 l1-cli pay $INVOICE

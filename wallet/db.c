@@ -869,6 +869,10 @@ static struct migration dbmigrations[] = {
      NULL},
     {SQL("ALTER TABLE channel_htlcs ADD fees_msat BIGINT DEFAULT 0"), NULL},
     {SQL("ALTER TABLE channel_funding_inflights ADD lease_fee BIGINT DEFAULT 0"), NULL},
+    /* Splicing requires us to store HTLC sigs for inflight splices and allows us to discard old sigs after splice confirmation. */
+    {SQL("ALTER TABLE htlc_sigs ADD inflight_id BLOB REFERENCES channel_funding_inflights(funding_tx_id)"), NULL},
+    {SQL("ALTER TABLE channel_funding_inflights ADD starting_htlc_id INTEGER DEFAULT 0"), NULL},
+    {SQL("CREATE UNIQUE INDEX channel_funding_inflights_channel_id ON channel_funding_inflights(funding_tx_id)"), NULL},
     // ADD THE ALTER TABLE COMMAND HERE
 };
 
