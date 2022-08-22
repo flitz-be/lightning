@@ -1736,12 +1736,6 @@ static enum watch_result funding_depth_cb(struct lightningd *ld,
 		return DELETE_WATCH;
 	}
 
-	char buf[2048];
-
-	sprintf(buf, "funding_depth_cb with depth %d", (int)depth);
-
-	DLOG(buf);
-
 	// TODO: Handle the case where we get here with an inflight splice
 	// 1) Make the inflight *not* replace the existing tx until 6 confs
 	// 2) Current code just sets the last_sig to 0x0. Need to set that to the right thing
@@ -1753,10 +1747,13 @@ static enum watch_result funding_depth_cb(struct lightningd *ld,
 	tal_free(txidstr);
 
 	bool min_depth_reached = depth >= channel->minimum_depth;
+	bool min_depth_no_scid = min_depth_reached && !channel->scid;
+	bool some_depth_has_scid = depth && channel->scid;
 
 	/* Reorg can change scid, so always update/save scid when possible (depth=0
 	 * means the stale block with our funding tx was removed) */
-	if ((min_depth_reached && !channel->scid) || (depth && channel->scid)) {
+	if (channel->state != CHANNELD_AWAITING_SPLICE
+	    && (min_depth_no_scid || some_depth_has_scid)) {
 		struct txlocator *loc;
 		struct channel_inflight *inf;
 
