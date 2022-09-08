@@ -155,11 +155,15 @@ static void handle_splice_confirmed_init(struct lightningd *ld,
 		return;
 	}
 
+	log_debug(ld->log, "[SPLICE] handle_splice_confirmed_init msg");
+
 	list_for_each_safe(&ld->splice_commands, cc, n, list) {
-		
+
 		struct json_stream *response = json_stream_success(cc->cmd);
 		json_add_string(response, "message", "Splice intiated");
 		json_add_string(response, "psbt", psbt_to_b64(tmpctx, psbt));
+
+		log_debug(ld->log, "[SPLICE] handle_splice_confirmed_init trigger command success");
 
 		was_pending(command_success(cc->cmd, response));
 
@@ -189,7 +193,7 @@ static void handle_splice_confirmed_update(struct lightningd *ld,
 	}
 
 	list_for_each_safe(&ld->splice_commands, cc, n, list) {
-		
+
 		struct json_stream *response = json_stream_success(cc->cmd);
 		json_add_string(response, "message", "Splice updated");
 		json_add_string(response, "psbt", psbt_to_b64(tmpctx, psbt));
@@ -243,7 +247,9 @@ static void handle_splice_confirmed_finalize(struct lightningd *ld,
 	}
 
 	list_for_each_safe(&ld->splice_commands, cc, n, list) {
-		
+
+		// TODO check for multiple splice commands and do it correctly
+
 		struct json_stream *response = json_stream_success(cc->cmd);
 		json_add_string(response, "message", "Splice finalized");
 		json_add_string(response, "psbt", psbt_to_b64(tmpctx, psbt));
@@ -305,6 +311,8 @@ static void send_splice_tx_done(struct bitcoind *bitcoind UNUSED,
 
 	bitcoin_outpoint.txid = txid;
 	bitcoin_outpoint.n = info->output_index;
+
+	(void)bitcoin_outpoint;
 
 	//DTODO Set new channel id on confirmation
 	// derive_channel_id(&info->channel->cid, &bitcoin_outpoint);
@@ -506,7 +514,7 @@ static void handle_add_inflight(struct lightningd *ld,
 				channel->push);
 
 	wallet_inflight_add(ld->wallet, inflight);
-	
+
 	channel_watch_inflight(ld, channel, inflight);
 }
 
@@ -1331,7 +1339,7 @@ bool channel_tell_depth(struct lightningd *ld,
 		if(depth >= 6) {
 
 			u8 *msg = towire_channeld_inflight_mindepth(NULL,
-								    txid, 
+								    txid,
 								    depth);
 
 			subd_send_msg(channel->owner, take(msg));
@@ -1620,6 +1628,8 @@ static struct command_result *json_splice_init(struct command *cmd,
 					       const jsmntok_t *obj UNNEEDED,
 					       const jsmntok_t *params)
 {
+	log_debug(cmd->ld->log, "[SPLICE] starting json_splice_init");
+
 	struct node_id *id;
 	u8 *msg;
 	struct channel *channel;
@@ -1628,11 +1638,15 @@ static struct command_result *json_splice_init(struct command *cmd,
 
 	if(!param(cmd, buffer, params,
 		  p_opt("id", param_node_id, &id),
-		  NULL))
+		  NULL)) {
+
+		log_debug(cmd->ld->log, "[SPLICE] json_splice_init failing because no 'id'");
 		return command_param_failed();
+	}
 
 	peer = peer_by_id(cmd->ld, id);
 	if (!peer) {
+		log_debug(cmd->ld->log, "[SPLICE] json_splice_init failing because Unknown peer");
 		return command_fail(cmd, FUNDING_UNKNOWN_PEER, "Unknown peer");
 	}
 
@@ -1640,6 +1654,7 @@ static struct command_result *json_splice_init(struct command *cmd,
 
 	channel = peer_active_channel(peer);
 	if (!channel) {
+		log_debug(cmd->ld->log, "[SPLICE] json_splice_init failing because peer is not active");
 		return command_fail(cmd, LIGHTNINGD, "Peer is not active, state: %s",
 				    channel_state_name(channel));
 	}
@@ -1647,13 +1662,16 @@ static struct command_result *json_splice_init(struct command *cmd,
 	if (!feature_negotiated(cmd->ld->our_features,
 			        peer->their_features,
 				OPT_DUAL_FUND)) {
+		log_debug(cmd->ld->log, "[SPLICE] json_splice_init failing fuding v2 isnt supported");
 		return command_fail(cmd, FUNDING_V2_NOT_SUPPORTED,
 				    "v2 openchannel not supported "
 				    "by peer");
 	}
 
+	log_debug(cmd->ld->log, "[SPLICE] json_splice_init passed checks and is saving cmd");
+
 	cc = tal(NULL, struct splice_command);
-	
+
 	list_add_tail(&cmd->ld->splice_commands, &cc->list);
 
 	cc->cmd = tal_steal(cc, cmd);
@@ -1661,6 +1679,8 @@ static struct command_result *json_splice_init(struct command *cmd,
 
 	assert(channel);
 	assert(channel->owner);
+
+	log_debug(cmd->ld->log, "[SPLICE] json_splice_init is sending message to start splice to daemon");
 
 	msg = towire_channeld_splice_init(tmpctx);
 
@@ -1707,7 +1727,7 @@ static struct command_result *json_splice_update(struct command *cmd,
 	}
 
 	cc = tal(NULL, struct splice_command);
-	
+
 	list_add_tail(&cmd->ld->splice_commands, &cc->list);
 
 	cc->cmd = tal_steal(cc, cmd);
@@ -1759,7 +1779,7 @@ static struct command_result *json_splice_finalize(struct command *cmd,
 	}
 
 	cc = tal(NULL, struct splice_command);
-	
+
 	list_add_tail(&cmd->ld->splice_commands, &cc->list);
 
 	cc->cmd = tal_steal(cc, cmd);
@@ -1813,7 +1833,7 @@ static struct command_result *json_splice_signed(struct command *cmd,
 	}
 
 	cc = tal(NULL, struct splice_command);
-	
+
 	list_add_tail(&cmd->ld->splice_commands, &cc->list);
 
 	cc->cmd = tal_steal(cc, cmd);
@@ -1845,7 +1865,7 @@ static const struct json_command splice_update_command = {
 	"Update {channel_id} currently active negotiated splice with {psbt}. "
 	""
 	"Returns updated {psbt} with (partial) contributions from peer. "
-	"If {commitments_secured} is true, next call may be to splicechannel_signed, "
+	"If {commitments_secured} is true, next call may be to splicechannel_finalize, "
 	"otherwise keep calling splice_update passing back in the returned PSBT until "
 	"{commitments_secured} is true."
 };
@@ -1871,7 +1891,7 @@ AUTODATA(json_command, &splice_finalize_command);
 // commitments_secured <-> tx_complete by both sides
 // User takes result and adds it to our psbt and send it back in
 
-// See dual funding 
+// See dual funding
 
 // RBFs can just be new splices
 // -> calculate feerate is high enough

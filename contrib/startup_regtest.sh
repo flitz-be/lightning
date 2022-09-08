@@ -35,6 +35,8 @@ if [ -z "$PATH_TO_LIGHTNING" ] && [ -x cli/lightning-cli ] && [ -x lightningd/li
 	PATH_TO_LIGHTNING=$(pwd)
 fi
 
+alias pythoncheck='PYTHONPATH=$(pwd)/contrib/pyln-proto:$(pwd)/contrib/pyln-client:$(pwd)/contrib/pyln-testing py.test tests/'
+
 if [ -z "$PATH_TO_LIGHTNING" ]; then
 	# Already installed maybe?  Prints
 	# shellcheck disable=SC2039

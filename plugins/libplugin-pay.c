@@ -2349,7 +2349,7 @@ local_channel_hints_listpeers(struct command *cmd, const char *buffer,
 
 			bool goodchannel = json_tok_streq(buffer, state, "CHANNELD_NORMAL");
 			goodchannel |= json_tok_streq(buffer, state, "CHANNELD_AWAITING_SPLICE");
-			
+
 			h.enabled &= goodchannel;
 
 			json_to_short_channel_id(buffer, scid, &h.scid.scid);

@@ -704,6 +704,136 @@ static void topo_update_spends(struct chain_topology *topo, struct block *b)
 		}
 	}
 
+	/*
+
+(these are all after mining 1 block aka 1 conf on splice)
+
+WITHOUT ANY CHANGES FOR 12 BLOCK RULE
+
+DEBUG   lightningd: Adding block 359: 2caa543019062e94c4029173d408160a959b2845b290d4b1079397968fe0ab2e
+DEBUG   02a7de83f60773981dccf1546a2b10adb4149a72f1aeac8454d9ca4d33c7d79cd1-chan#1: Got UTXO spend for 546d0a4a863c3560c6e0b9f0088ad6b70eb2b02c713acb05132d6b537e51d292:1: 687d44f128997a1d3ca91c329f596a55288c4a0a66ad74e0da71ba5fcf76997f
+DEBUG   gossipd: get_channel rstate->chanmap 388127604670465
+DEBUG   gossipd: Deleting channel 353x1x1 due to the funding outpoint being spent
+DEBUG   gossipd: add_to_txout_failures
+DEBUG   gossipd: rstate->txout_failures uintmap_add: 388127604670465
+DEBUG   gossipd: remove_channel_from_store
+DEBUG   gossipd: free_chan
+DEBUG   gossipd: remove_chan_from_node
+DEBUG   gossipd: destroy_node
+DEBUG   gossipd: first_chan
+DEBUG   gossipd: next_chan_arr
+DEBUG   gossipd: remove_chan_from_node
+DEBUG   gossipd: destroy_node
+DEBUG   gossipd: first_chan
+DEBUG   gossipd: next_chan_arr
+DEBUG   gossipd: uintmap_del: 388127604670465
+
+$ INVOICE=`l2-cli invoice 10000 test6blocks test6blocks | jq -r .bolt11`
+$ l1-cli pay $INVOICE
+{
+   "code": 210,
+   "message": "Destination 02a7de83f60773981dccf1546a2b10adb4149a72f1aeac8454d9ca4d33c7d79cd1 is not reachable directly and all routehints were unusable.",
+   "attempts": [
+      {
+         "status": "failed",
+         "failreason": "Destination 02a7de83f60773981dccf1546a2b10adb4149a72f1aeac8454d9ca4d33c7d79cd1 is not reachable directly and all routehints were unusable.",
+         "partid": 0,
+         "amount": "10000msat"
+      }
+   ]
+}
+
+WITH NAIEVE - 12 BLOCK HEIGHT CHANGE
+
+DEBUG   lightningd: Adding block 367: 0ab8f8b79fb94e888915584fc4955a0754ae7f89cfc7e5bff336aaeabea906ab
+
+DEBUG   02...45-chan#1: Got UTXO spend for 168e7e31be7e650c7f702b4c538ba3264df1a959be15135cd1588cc1d3ab9e6c:1: 2283886a89728e45eff73ea44991399c47aaebbd372a1b4e43c63d770e2f0153
+DEBUG   02...45-chan#1: attempting update blockheight d351503392bfb41576c336e33f509ea0c76fe9ff8e6457bafd77cdca69d87f2b
+DEBUG   02...45-chan#1: Got depth change 0->1 for 2283886a89728e45eff73ea44991399c47aaebbd372a1b4e43c63d770e2f0153
+DEBUG   02...45-chan#1: Funding tx 2283886a89728e45eff73ea44991399c47aaebbd372a1b4e43c63d770e2f0153 depth 1 of 1
+DEBUG   gossipd: REPLY WIRE_GOSSIPD_NEW_BLOCKHEIGHT_REPLY with 0 fds
+DEBUG   02...45-channeld-chan#1: billboard: Funding transaction locked. Channel announced.
+
+$ INVOICE=`l2-cli invoice 10000 test6blocks test6blocks | jq -r .bolt11`
+$ l1-cli pay $INVOICE
+{
+   "code": 210,
+   "message": "Destination 02ee606d4c4c089ef00e88e76548b5a9d9d7e9e012da3fa65ab44f9a31dc7dc945 is not reachable directly and all routehints were unusable.",
+   "attempts": [
+      {
+         "status": "failed",
+         "failreason": "Destination 02ee606d4c4c089ef00e88e76548b5a9d9d7e9e012da3fa65ab44f9a31dc7dc945 is not reachable directly and all routehints were unusable.",
+         "partid": 0,
+         "amount": "10000msat"
+      }
+   ]
+}
+
+
+DEBUG   lightningd: Adding block 375: 333a51bcfc19b840302e2af22149f44da272b5fb3eb9f5e1336be732f49f5656
+DEBUG   03..57-chan#1: Got UTXO spend for f4b49bc1f37c9a1babcac3621c5ac277492339b2f94f1549fcc9d86e0086b959:0: 97ad251066bf87eea38e18b60d5e3a1e95b101702a320f775f226cb467fd6887
+DEBUG   03..57-chan#1: attempting update blockheight 1955ce221d79ddda1471e1ce45fc83437d6b7b472e0278c775e1e1d2b68d89df
+DEBUG   03..57-chan#1: Got depth change 0->1 for 97ad251066bf87eea38e18b60d5e3a1e95b101702a320f775f226cb467fd6887
+DEBUG   03..57-chan#1: Funding tx 97ad251066bf87eea38e18b60d5e3a1e95b101702a320f775f226cb467fd6887 depth 1 of 6
+
+$ l1-cli pay $INVOICE
+{
+   "code": 210,
+   "message": "Destination 032b222f288beb09fd888dd1bb249654edfdb3a3b6adeb7a44107bca2ce8379457 is not reachable directly and all routehints were unusable.",
+   "attempts": [
+      {
+         "status": "failed",
+         "failreason": "Destination 032b222f288beb09fd888dd1bb249654edfdb3a3b6adeb7a44107bca2ce8379457 is not reachable directly and all routehints were unusable.",
+         "partid": 0,
+         "amount": "10000msat"
+      }
+   ]
+}
+
+GOSSIP VERSION 9
+1: DELETED
+457: DELETED
+611: delete channel: 369x1x0
+
+633: PUSH t=1660854803 channel_announcement: 01000ddffd3422ba213969434fba7b71da7a648be38fd8af564df07470be073e347c6b13263e70b9366d687fd2a0b8aead039f16c3f161b99ab34c68a6ba2439c20b7c1bf68ea6c4fac6c500f77df5adee4275ba4e7b744c703757e7cd6d355ff2515133739a96171c23bbc82f7c1e7741d1973af8d074b0c451563c3454f9fecda334c377f3c67a32ab6938ce1811e7731ff603d4a88f9d3db7c06e386659582961303055cc2f9028968230b9bf8aef66e5c1787921543b590f1e0799ea5664c9a33475149cb8938c661eb73c9e843cb35346f704d038391868eaba1f6a1bf7ce2376126bebbfee90b9eeee3482cbe0170c33a1d8f7d66afcf69d1e8548f58ac3f3000006226e46111a0b59caaf126043eb5bbf28c34f3a5e332a1fc7b2b73cf188910f0001710000010000032b222f288beb09fd888dd1bb249654edfdb3a3b6adeb7a44107bca2ce837945703603f55bd528b79c4acb79b090d05c110158f7676547c0b4699b487983ab1ef5502b4a0e8fa34073a106225e074858e3fae10a251d13ac1fa60ff4525170849fe3603275a27d54dca83ccb830598f6a5476206656f181e9e6cbe1b86c19335d5393d2
+
+WIRE_CHANNEL_ANNOUNCEMENT:
+node_signature_1=304402200ddffd3422ba213969434fba7b71da7a648be38fd8af564df07470be073e347c02206b13263e70b9366d687fd2a0b8aead039f16c3f161b99ab34c68a6ba2439c20b
+node_signature_2=304402207c1bf68ea6c4fac6c500f77df5adee4275ba4e7b744c703757e7cd6d355ff25102205133739a96171c23bbc82f7c1e7741d1973af8d074b0c451563c3454f9fecda3
+bitcoin_signature_1=3044022034c377f3c67a32ab6938ce1811e7731ff603d4a88f9d3db7c06e3866595829610220303055cc2f9028968230b9bf8aef66e5c1787921543b590f1e0799ea5664c9a3
+bitcoin_signature_2=304402203475149cb8938c661eb73c9e843cb35346f704d038391868eaba1f6a1bf7ce23022076126bebbfee90b9eeee3482cbe0170c33a1d8f7d66afcf69d1e8548f58ac3f3
+features=[]
+chain_hash=0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206
+short_channel_id=369x1x0
+node_id_1=032b222f288beb09fd888dd1bb249654edfdb3a3b6adeb7a44107bca2ce8379457
+node_id_2=03603f55bd528b79c4acb79b090d05c110158f7676547c0b4699b487983ab1ef55
+bitcoin_key_1=02b4a0e8fa34073a106225e074858e3fae10a251d13ac1fa60ff4525170849fe36
+bitcoin_key_2=03275a27d54dca83ccb830598f6a5476206656f181e9e6cbe1b86c19335d5393d2
+
+1077: channel_amount: 1000000sat
+1099: DELETED PUSH
+1249: PUSH t=1660854804 channel_update: 01021bd849633098b2ce2587d0d091d2c4be4fe0aabb534edfbd155b5b7a4dc7718338e810627ffed7ab4c8bb00aeb337dde28ca705da6e89d98dfc5dde2ace8386e06226e46111a0b59caaf126043eb5bbf28c34f3a5e332a1fc7b2b73cf188910f000171000001000062fea214010000060000000000000000000000010000000a000000003b023380
+1399: PUSH t=1660854808 node_announcement: 01012cb7f2126f92f22a8d4c6ea881337d3488ef2115f991ebe60167bfe561a265e452e1ac45c72f28f2ee1f1d8afc9c6bbd6649503f37f1ad9968a875f019beaed0000780008828226aa262fea21803603f55bd528b79c4acb79b090d05c110158f7676547c0b4699b487983ab1ef5503603f4348494c4c59474c45452d322d3436372d67336337613637322d6d6f64646564000d05096c6f63616c686f73741c03010d029a00320064000000024c4b40
+1588: PUSH t=1660854804 channel_update: 01027d82592119a5299392c9de47b22f84112d13a5101aa8bd4fcec261156ded0bcd4929a4642325d3fd8b061d8fe77692070d7213ffd827ca8f5cb5b205a30d6ef606226e46111a0b59caaf126043eb5bbf28c34f3a5e332a1fc7b2b73cf188910f000171000001000062fea214010500060000000000000000000000010000000a000000003b023380
+1738: t=1660854808 node_announcement: 01017c090b89f6d671a08260f2ed2ebf35110598293d3017725458abdbd48abe503e4ca50d666c45bef3cda9b781e42a8026d574ccc02b3ab645d001100408b9ffcc000780008828226aa262fea218032b222f288beb09fd888dd1bb249654edfdb3a3b6adeb7a44107bca2ce8379457032b224a554e494f524d4f4e4b45592d3436372d67336337613637322d6d6f64646564000d05096c6f63616c686f73741c68010d029a00320064000000024c4b40
+
+
+Without -12 block change
+
+GOSSIP VERSION 9
+1: DELETED
+457: DELETED
+611: delete channel: 377x1x0
+633: DELETED PUSH
+1077: DELETED
+1099: DELETED PUSH
+1249: DELETED PUSH
+1399: DELETED PUSH
+1588: DELETED PUSH
+1738: DELETED
+1927: delete channel: 377x1x0
+	*/
+
 	/* Retrieve all potential channel closes from the UTXO set and
 	 * tell gossipd about them. */
 	spent_scids =

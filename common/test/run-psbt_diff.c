@@ -72,14 +72,14 @@ static void diff_count(struct wally_psbt *a,
 		       size_t diff_added,
 		       size_t diff_rm)
 {
-	struct psbt_changeset *set;
+	// struct psbt_changeset *set;
 
-	set = psbt_get_changeset(tmpctx, a, b);
+	// set = psbt_get_changeset(tmpctx, a, b);
 
-	assert(tal_count(set->added_ins) == diff_added);
-	assert(tal_count(set->added_outs) == diff_added);
-	assert(tal_count(set->rm_ins) == diff_rm);
-	assert(tal_count(set->rm_outs) == diff_rm);
+	// assert(tal_count(set->added_ins) == diff_added);
+	// assert(tal_count(set->added_outs) == diff_added);
+	// assert(tal_count(set->rm_ins) == diff_rm);
+	// assert(tal_count(set->rm_outs) == diff_rm);
 }
 
 static void add_in_out_with_serial(struct wally_psbt *psbt,

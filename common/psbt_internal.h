@@ -20,7 +20,7 @@ struct witness_element;
 void psbt_finalize_input(const tal_t *ctx,
 			 struct wally_psbt_input *in,
 			 const struct witness_element **elements);
-/* psbt_finalize_multisig_signatures - Takes signatures from the 
+/* psbt_finalize_multisig_signatures - Takes signatures from the
  * "partial signatures" section and adds them to the witness stack
  * in the order their corresponding public keys appear in the witness
  * script. If the signature is already present, it is not added.
@@ -32,7 +32,7 @@ void psbt_finalize_input(const tal_t *ctx,
  *
  * @ctx - the context to allocate onto
  * @in - input to set final_witness for
- * 
+ *
  * Returns the number of signatures that were recognized as correct
  * for the witness script (whether they were already present or not).
  */
