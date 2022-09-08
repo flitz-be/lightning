@@ -199,7 +199,7 @@ fund_nodes() {
 
 	last_node=""
 
-	for i in $NODES; do
+	while read i; do
 
 		if [ -z "$last_node" ]; then
 			last_node=$i
@@ -246,7 +246,8 @@ fund_nodes() {
 		done
 
 		echo "done."
-	done
+
+	done <<< "$NODES"
 }
 
 splice() {
@@ -260,9 +261,6 @@ splice() {
 	pkill -9 lightning_channeld
 	rm -rf /tmp/l1-regtest/ /tmp/l2-regtest/
 
-	btcli='bitcoin-cli -regtest'
-	l1cli="$LCLI"" --lightning-dir=/tmp/l1-regtest"
-
 	make -j12
 	start_ln
 
@@ -275,20 +273,28 @@ splice() {
 		read
 	fi
 
-	PEER_ID=`$l1cli listpeers | jq -r .peers[0].id`
-	PSBT=`$l1cli splice_init $PEER_ID | jq -r .psbt`
-	PSBT_FUNDS=`$l1cli fundpsbt 100000sat slow 166 | jq -r .psbt`
-	PSBT=`$btcli joinpsbts "[\"$PSBT\", \"$PSBT_FUNDS\"]"`
-	PSBT=`$l1cli splice_update $PEER_ID $PSBT | jq -r .psbt`
-	PSBT=`$l1cli splice_finalize $PEER_ID | jq -r .psbt`
-	PSBT=`$l1cli signpsbt -k psbt="$PSBT" | jq -r .signed_psbt`
-	$l1cli splice_signed $PEER_ID $PSBT
+	echo "get peer id"
+	PEER_ID=`"$LCLI" --lightning-dir=/tmp/l1-regtest listpeers | jq -r ".peers[0].id"`
+	echo "splice init"
+	PSBT=`"$LCLI" --lightning-dir=/tmp/l1-regtest splice_init $PEER_ID | jq -r ".psbt"`
+	echo "get funds"
+	PSBT_FUNDS=`"$LCLI" --lightning-dir=/tmp/l1-regtest fundpsbt 100000sat slow 166 | jq -r ".psbt"`
+	echo "join psbts"
+	PSBT=`bitcoin-cli -regtest joinpsbts "[\"$PSBT\", \"$PSBT_FUNDS\"]"`
+	echo "splice update"
+	PSBT=`"$LCLI" --lightning-dir=/tmp/l1-regtest splice_update $PEER_ID $PSBT | jq -r ".psbt"`
+	echo "splice finalize"
+	PSBT=`"$LCLI" --lightning-dir=/tmp/l1-regtest splice_finalize $PEER_ID | jq -r ".psbt"`
+	echo "signpsbt"
+	PSBT=`"$LCLI" --lightning-dir=/tmp/l1-regtest signpsbt -k psbt="$PSBT" | jq -r ".signed_psbt"`
+	echo "splice_signed"
+	PSBT=`"$LCLI" --lightning-dir=/tmp/l1-regtest splice_signed "$PEER_ID" "$PSBT" | jq -r ".signed_psbt"`
 
 	sleep 1
 
 	echo "Transactions in mempool:"
 
-	$btcli getrawmempool
+	bitcoin-cli -regtest getrawmempool
 }
 
 stop_nodes() {
