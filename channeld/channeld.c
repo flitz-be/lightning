@@ -272,7 +272,7 @@ static void end_stfu_mode(struct peer *peer)
 static void maybe_send_stfu(struct peer *peer)
 {
 	if (!peer->stfu) {
-		status_unusual("Attempted to STFU while already in STFU mode.");
+		status_unusual("maybe_send_stfu called while not in STFU mode (ignored).");
 		return;
 	}
 
@@ -282,6 +282,10 @@ static void maybe_send_stfu(struct peer *peer)
 				      peer->stfu_initiator == LOCAL);
 		peer_write(peer->pps, take(msg));
 		peer->stfu_sent[LOCAL] = true;
+	}
+	else if(pending_updates(peer->channel, LOCAL, false)) {
+
+		status_debug("Pending updates prevent us from STFU mode at this time.");
 	}
 
 	if (peer->stfu_sent[LOCAL] && peer->stfu_sent[REMOTE]) {
@@ -296,12 +300,14 @@ static void maybe_send_stfu(struct peer *peer)
 		}
 	}
 	else {
-		status_debug("STFU waiting for both sides to confirm");
+		status_debug("STFU in await mode.");
 	}
 }
 
 static void handle_stfu(struct peer *peer, const u8 *stfu)
 {
+	status_debug("handle_stfu happening");
+
 	struct channel_id channel_id;
 	u8 remote_initiated;
 
@@ -330,6 +336,7 @@ static void handle_stfu(struct peer *peer, const u8 *stfu)
 					 "Unsolicited STFU but you said"
 					 " you didn't initiate?");
 		peer->stfu_initiator = REMOTE;
+
 		status_debug("STFU intiator was remote.");
 	} else {
 		/* BOLT-quiescent #2:
@@ -1972,7 +1979,7 @@ static void handle_peer_commit_sig(struct peer *peer, const u8 *msg)
 		 * A sending node:
 		 *   - MUST NOT send a `commitment_signed` message that does not
 		 *     include any updates.
-		 * 
+		 *
 		 * TODO: Update this bolt reference with the splice PR addition
 		 */
 		status_debug("Oh hi LND! Empty commitment at #%"PRIu64,
@@ -2288,6 +2295,12 @@ static void handle_peer_commit_sig(struct peer *peer, const u8 *msg)
 	/* We may now be quiescent on our side. */
 	maybe_send_stfu(peer);
 
+	/* STFU can't be activated during pending updates.
+	 * With updates finish let's handle a potentially queued stfu request.
+	 */
+	status_debug("Sending (any) queued STFU requests");
+	maybe_send_stfu(peer);
+
 	/* This might have synced the feerates: if so, we may want to
 	 * update */
 	if (want_fee_update(peer, NULL))
@@ -2434,6 +2447,12 @@ static void handle_peer_revoke_and_ack(struct peer *peer, const u8 *msg)
 				    &peer->remote_per_commit),
 		     type_to_string(tmpctx, struct pubkey,
 				    &peer->old_remote_per_commit));
+
+	/* STFU can't be activated during pending updates.
+	 * With updates finish let's handle a potentially queued stfu request.
+	 */
+	status_debug("Sending (any) queued STFU requests");
+	maybe_send_stfu(peer);
 
 	start_commit_timer(peer);
 }
@@ -2949,7 +2968,7 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 
 	psbt_txid(tmpctx, ictx.current_psbt, &outpoint.txid, NULL);
 
-	outpoint.n = 0; 
+	outpoint.n = 0;
 	/* Todo find output index using redeem script & validate there
 	 * is only one */
 
@@ -3225,6 +3244,8 @@ static struct bitcoin_tx *bitcoin_tx_from_txid(struct peer *peer,
 
 static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 {
+	status_debug("[SPLICE] handle_peer_splice_ack");
+
 	const u8 *wit_script;
 	u8 *outmsg;
 	struct interactivetx_context ictx;
@@ -3261,7 +3282,7 @@ static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 					 &peer->channel->funding_pubkey[1]);
 
 	/* First we spend the existing channel outpoint
-	 * 
+	 *
 	 * Bolt #2
 	 *   The initiator:
 	 *     - MUST `tx_add_input` an input which spends the current funding
@@ -3284,7 +3305,7 @@ static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 
 	/* Next we add the new channel outpoint, with a 0 amount for now. It
 	 * will be filled in later.
-	 * 
+	 *
 	 * Bolt #2
 	 *   The initiator:
 	 *     ...
@@ -3318,6 +3339,8 @@ static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 
 	/* Return the current PSBT to the channel_control to give to user.
 	 */
+
+	status_debug("[SPLICE] channeld sends towire_channeld_splice_confirmed_init");
 
 	outmsg = towire_channeld_splice_confirmed_init(tmpctx,
 						       ictx.current_psbt);
@@ -3513,7 +3536,7 @@ static void handle_splice_signed(struct peer *peer, const u8 *inmsg)
 
 	psbt_txid(tmpctx, signed_psbt, &outpoint.txid, NULL);
 
-	outpoint.n = 0; 
+	outpoint.n = 0;
 	/* Todo find output index using redeem script & validate there
 	 * is only one */
 
@@ -3781,13 +3804,15 @@ static void handle_splice_signed(struct peer *peer, const u8 *inmsg)
 	outmsg = towire_channeld_splice_confirmed_signed(tmpctx, final_tx,
 							 chan_output_index);
 	wire_sync_write(MASTER_FD, take(outmsg));
-	
+
 	send_channel_update(peer, 0);
 }
 
 static void handle_splice_stfu_success(struct peer *peer)
 {
 	u8 *msg;
+
+	status_debug("[SPLICE] handle_splice_stfu_success");
 
 	msg = towire_splice(tmpctx,
 			    &chainparams->genesis_blockhash,
