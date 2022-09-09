@@ -2647,6 +2647,7 @@ static struct command_result *json_setchannelfee(struct command *cmd,
 			struct channel *channel;
 			list_for_each(&peer->channels, channel, list) {
 				if (channel->state != CHANNELD_NORMAL &&
+				    channel->state != CHANNELD_AWAITING_SPLICE &&
 				    channel->state != CHANNELD_AWAITING_LOCKIN &&
 				    channel->state != DUALOPEND_AWAITING_LOCKIN)
 					continue;

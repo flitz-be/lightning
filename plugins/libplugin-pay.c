@@ -2337,7 +2337,11 @@ local_channel_hints_listpeers(struct command *cmd, const char *buffer,
 			 * either a) disconnected, or b) not in normal
 			 * state. */
 			json_to_bool(buffer, connected, &h.enabled);
-			h.enabled &= json_tok_streq(buffer, state, "CHANNELD_NORMAL");
+
+			bool goodchannel = json_tok_streq(buffer, state, "CHANNELD_NORMAL");
+			goodchannel |= json_tok_streq(buffer, state, "CHANNELD_AWAITING_SPLICE");
+			
+			h.enabled &= goodchannel;
 
 			if (scid != NULL)
 				json_to_short_channel_id(buffer, scid, &h.scid.scid);
@@ -3241,7 +3245,8 @@ static struct command_result *direct_pay_listpeers(struct command *cmd,
 
 		for (size_t i=0; i<tal_count(peer->channels); i++) {
 			struct listpeers_channel *chan = r->peers[0]->channels[i];
-			if (!streq(chan->state, "CHANNELD_NORMAL"))
+			if (!streq(chan->state, "CHANNELD_NORMAL")
+				&& !streq(chan->state, "CHANNELD_AWAITING_SPLICE"))
 			    continue;
 
 			/* Must have either a local alias for zeroconf

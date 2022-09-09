@@ -441,12 +441,14 @@ void channel_set_last_tx(struct channel *channel,
 
 static inline bool channel_can_add_htlc(const struct channel *channel)
 {
-	return channel->state == CHANNELD_NORMAL;
+	return channel->state == CHANNELD_NORMAL
+		|| channel->state == CHANNELD_AWAITING_SPLICE;
 }
 
 static inline bool channel_fees_can_change(const struct channel *channel)
 {
 	return channel->state == CHANNELD_NORMAL
+		|| channel->state == CHANNELD_AWAITING_SPLICE
 		|| channel->state == CHANNELD_SHUTTING_DOWN;
 }
 

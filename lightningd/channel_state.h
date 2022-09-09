@@ -42,9 +42,9 @@ enum channel_state {
 	DUALOPEND_AWAITING_LOCKIN,
 
 	/* super awesome comment explaining this */
-	CHANNELD_AWAITING_SPLICE = 0x80 | CHANNELD_NORMAL,
+	CHANNELD_AWAITING_SPLICE,
 };
-#define CHANNEL_STATE_MAX DUALOPEND_AWAITING_LOCKIN
+#define CHANNEL_STATE_MAX CHANNELD_AWAITING_SPLICE
 
 enum state_change {
 	/* Anything other than the reasons below. Should not happen. */
