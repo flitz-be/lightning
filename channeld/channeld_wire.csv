@@ -226,10 +226,19 @@ msgdata,channeld_splice_signed,psbt,wally_psbt,
 # channeld->master: Signed psbt is completed
 msgtype,channeld_splice_confirmed_signed,7213
 msgdata,channeld_splice_confirmed_signed,tx,bitcoin_tx,
-msgdata,channeld_splice_confirmed_signed,input_index,u32,
+msgdata,channeld_splice_confirmed_signed,output_index,u32,
+
+# master->channeld: Inflight tx has reached min-depth
+msgtype,channeld_inflight_mindepth,7214
+msgdata,channeld_inflight_mindepth,tx_id,bitcoin_txid,
+msgdata,channeld_inflight_mindepth,depth,u32,
+
+# When we receive splice_locked.
+msgtype,channeld_got_splice_locked,7215
+msgdata,channeld_got_splice_locked,next_per_commit_point,pubkey,
 
 # channeld->master: Add an inflight to the DB
-msgtype,channeld_add_inflight,7214
+msgtype,channeld_add_inflight,7216
 msgdata,channeld_add_inflight,tx_id,bitcoin_txid,
 msgdata,channeld_add_inflight,tx_outnum,u32,
 msgdata,channeld_add_inflight,feerate,u32,
@@ -238,11 +247,11 @@ msgdata,channeld_add_inflight,our_funding_satoshis,amount_sat,
 msgdata,channeld_add_inflight,psbt,wally_psbt,
 
 # channeld->master: Give me inflight index #n
-msgtype,channeld_get_inflight,7215
+msgtype,channeld_get_inflight,7217
 msgdata,channeld_get_inflight,index,u32,
 
 # master->channeld:Here is inflight index #n. NULL on last / index not found
-msgtype,channeld_got_inflight,7216
+msgtype,channeld_got_inflight,7218
 msgdata,channeld_got_inflight,is_found,bool,
 msgdata,channeld_got_inflight,tx_id,bitcoin_txid,
 msgdata,channeld_got_inflight,tx_outnum,u32,
