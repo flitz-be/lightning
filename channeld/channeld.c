@@ -152,6 +152,11 @@ struct peer {
 	bool stfu_sent[NUM_SIDES];
 	/* Updates master asked, which we've deferred while quiescing */
 	struct msg_queue *update_queue;
+	/* Callback for when when stfu is negotiated successfully */
+	void (*on_stfu_success)(struct peer*);
+	/* If set, send_commit will resend all commitments */
+	// TODO: Rename this send htlc commitments for a given splice txid
+	bool resend_all_commitments;
 #endif
 
 #if DEVELOPER
@@ -200,8 +205,6 @@ struct peer {
 
 	/* Most recent channel_update message. */
 	u8 *channel_update;
-
-	void (*on_stfu_success)(struct peer*);
 };
 
 static u8 *create_channel_announcement(const tal_t *ctx, struct peer *peer);
@@ -1336,6 +1339,107 @@ static void send_commit(struct peer *peer)
 		}
 	}
 
+	struct tlv_commitment_signed_tlvs *cs_tlv
+		= tlv_commitment_signed_tlvs_new(tmpctx);
+
+	cs_tlv->splice_commitsigs = tal_arrz(tmpctx,
+					     struct commitsigs *,
+					     0);
+
+	/* Loop over current inflights
+	 * BOLT #2:
+	 *   MUST send a commitsigs for each splice in progress, in increasing feerate order.
+	 *
+	 * TODO: Sort updates by increasing feerate order
+	 */
+	for(u32 i = 0; ; i++) {
+
+		u8 *msg;
+		bool is_found;
+		struct bitcoin_outpoint outpoint;
+		u32 theirFeerate;
+		struct amount_sat funding_sats, our_funding_sats;
+		struct wally_psbt *psbt;
+
+		wire_sync_write(MASTER_FD,
+			        take(towire_channeld_get_inflight(tmpctx,
+							          i)));
+
+		assert(!(fcntl(MASTER_FD, F_GETFL) & O_NONBLOCK));
+
+		msg = wire_sync_read(tmpctx, MASTER_FD);
+		if (!fromwire_channeld_got_inflight(tmpctx,
+						    msg,
+						    &is_found,
+						    &outpoint.txid,
+						    &outpoint.n,
+						    &theirFeerate,
+						    &funding_sats,
+						    &our_funding_sats,
+						    &psbt)) {
+
+			peer_failed_err(peer->pps,
+					&peer->channel_id,
+					"Invalid 'got_inflight' mesage from daemon");
+		}
+
+		if(!is_found)
+			break;
+
+		const struct htlc **all_htlcs;
+
+		/* TODO: Update channel_sending_commit(_all) to sign using the new
+		 * splice txid
+		 */
+
+		all_htlcs = tal_arr(tmpctx, const struct htlc *, 0);
+		if (!channel_sending_commit_all(peer->channel, &all_htlcs)) {
+			status_debug("Splice HTLC commit_all failed,"
+				     " feechange %s (%s)"
+				     " blockheight %s (%s)",
+				     want_fee_update(peer, NULL) ? "wanted": "not wanted",
+				     type_to_string(tmpctx, struct fee_states, peer->channel->fee_states),
+				     want_blockheight_update(peer, NULL) ? "wanted" : "not wanted",
+				     type_to_string(tmpctx, struct height_states, peer->channel->blockheight_states));
+
+			/* Covers the case where we've just been told to shutdown. */
+			maybe_send_shutdown(peer);
+
+			peer->commit_timer = NULL;
+			return;
+		}
+
+		/* TODO: Ensure this is returning txs for the given splice txid */
+
+		txs = channel_txs(tmpctx, &htlc_map, direct_outputs,
+				  &funding_wscript, peer->channel, &peer->remote_per_commit,
+				  peer->next_index[REMOTE], REMOTE);
+
+		txs[0] = bitcoin_tx_with_psbt(tmpctx, psbt);
+
+		int old_size = tal_count(cs_tlv->splice_commitsigs);
+
+		tal_resize(&cs_tlv->splice_commitsigs, old_size + 1);
+
+		cs_tlv->splice_commitsigs[old_size] = tal(tmpctx, struct commitsigs);
+
+		htlc_sigs =
+		    calc_commitsigs(tmpctx, peer, txs, funding_wscript, htlc_map,
+				    peer->next_index[REMOTE],
+				    &commit_sig);
+
+		struct commitsigs *commitsigs = cs_tlv->splice_commitsigs[old_size];
+
+	    	commitsigs->commit_signature = commit_sig.s;
+
+		commitsigs->htlc_signature = tal_arrz(tmpctx,
+						     secp256k1_ecdsa_signature,
+						     tal_count(htlc_sigs));
+
+		for(int i = 0; i < tal_count(htlc_sigs); i++)
+			commitsigs->htlc_signature[i] = htlc_sigs[i].s;
+	}
+
 	/* BOLT #2:
 	 *
 	 * A sending node:
@@ -1343,7 +1447,7 @@ static void send_commit(struct peer *peer)
 	 *     any updates.
 	 */
 	changed_htlcs = tal_arr(tmpctx, const struct htlc *, 0);
-	if (!channel_sending_commit(peer->channel, &changed_htlcs)) {
+	if (!peer->resend_all_commitments && !channel_sending_commit(peer->channel, &changed_htlcs)) {
 		status_debug("Can't send commit: nothing to send,"
 			     " feechange %s (%s)"
 			     " blockheight %s (%s)",
@@ -1362,6 +1466,8 @@ static void send_commit(struct peer *peer)
 	txs = channel_txs(tmpctx, &htlc_map, direct_outputs,
 			  &funding_wscript, peer->channel, &peer->remote_per_commit,
 			  peer->next_index[REMOTE], REMOTE);
+
+	peer->resend_all_commitments = false;
 
 	htlc_sigs =
 	    calc_commitsigs(tmpctx, peer, txs, funding_wscript, htlc_map,
@@ -1407,7 +1513,7 @@ static void send_commit(struct peer *peer)
 	msg = towire_commitment_signed(NULL, &peer->channel_id,
 				       &commit_sig.s,
 				       raw_sigs(tmpctx, htlc_sigs),
-				       NULL);
+				       cs_tlv);
 #else
 	msg = towire_commitment_signed(NULL, &peer->channel_id,
 				       &commit_sig.s,
@@ -1613,13 +1719,17 @@ static void handle_peer_commit_sig(struct peer *peer, const u8 *msg)
 	struct simple_htlc **htlcs;
 	const u8 * msg2;
 
+	//TODO: Check below should check if a splice is being sent and not error out
+
 	changed_htlcs = tal_arr(msg, const struct htlc *, 0);
-	if (!channel_rcvd_commit(peer->channel, &changed_htlcs)) {
+	if (false && !channel_rcvd_commit(peer->channel, &changed_htlcs)) {
 		/* BOLT #2:
 		 *
 		 * A sending node:
 		 *   - MUST NOT send a `commitment_signed` message that does not
 		 *     include any updates.
+		 * 
+		 * TODO: Update this bolt reference with the splice PR addition
 		 */
 		status_debug("Oh hi LND! Empty commitment at #%"PRIu64,
 			     peer->next_index[LOCAL]);
@@ -1628,6 +1738,8 @@ static void handle_peer_commit_sig(struct peer *peer, const u8 *msg)
 					 "commit_sig with no changes (again!)");
 		peer->last_empty_commitment = peer->next_index[LOCAL];
 	}
+
+	//TODO: Process splice tlv info, store it & react.
 
 	/* We were supposed to check this was affordable as we go. */
 	if (peer->channel->opener == REMOTE) {
@@ -1677,6 +1789,9 @@ static void handle_peer_commit_sig(struct peer *peer, const u8 *msg)
 				    &peer->channel->basepoints[REMOTE].htlc),
 		     type_to_string(tmpctx, struct pubkey,
 				    &peer->next_local_per_commit));
+
+	// TODO: Add check below but for each inflight splice
+
 	/* BOLT #2:
 	 *
 	 * A receiving node:
@@ -1710,6 +1825,8 @@ static void handle_peer_commit_sig(struct peer *peer, const u8 *msg)
 	 * local commitment transaction:
 	 *     - MUST send a `warning` and close the connection, or send an
 	 *       `error` and fail the channel.
+	 *
+	 * TODO: Repeat this check for HTLCs in the splice tlv
 	 */
 	if (tal_count(htlc_sigs) != tal_count(txs) - 1)
 		peer_failed_warn(peer->pps, &peer->channel_id,
@@ -1722,6 +1839,8 @@ static void handle_peer_commit_sig(struct peer *peer, const u8 *msg)
 	 *     transaction OR non-compliant with LOW-S-standard rule...:
 	 *     - MUST send a `warning` and close the connection, or send an
 	 *       `error` and fail the channel.
+	 *
+	 * TODO: Repeat this check for HTLCs in the splice tlv
 	 */
 	for (i = 0; i < tal_count(htlc_sigs); i++) {
 		u8 *wscript;
@@ -2250,7 +2369,7 @@ static struct wally_psbt *next_splice_step(struct interactivetx_context *ictx)
 
 static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 {
-	u8 *msg;
+	const u8 *msg;
 	struct interactivetx_context ictx;
 
 	msg = towire_splice_ack(tmpctx,
@@ -2287,15 +2406,157 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 		peer_failed_err(peer->pps, &peer->channel_id,
 				"Interactive splicing error: %s", error);
 	}
+
+	struct wally_tx_output *newChanOutpoint = &ictx.current_psbt->tx->outputs[0];
+
+	newChanOutpoint->satoshi = peer->channel->funding_sats.satoshis - 500;
+
+	psbt_elements_normalize_fees(ictx.current_psbt);
+
+	struct bitcoin_outpoint outpoint;
+
+	psbt_txid(tmpctx, ictx.current_psbt, &outpoint.txid, NULL);
+
+	outpoint.n = 0; 
+	/* Todo find output index using redeem script & validate there
+	 * is only one */
+
+	struct amount_sat funding_sats, our_funding_sats;
+
+	funding_sats.satoshis = newChanOutpoint->satoshi;
+	our_funding_sats.satoshis = 0;
+
+	u32 theirFeerate = channel_feerate(peer->channel, REMOTE);
+
+	wire_sync_write(MASTER_FD,
+			towire_channeld_add_inflight(tmpctx,
+						     &outpoint.txid,
+						     outpoint.n,
+						     theirFeerate,
+						     funding_sats,
+						     our_funding_sats, /* <- todo */
+						     ictx.current_psbt));
+
+	peer->resend_all_commitments = true;
+
+	send_commit(peer);
+
+	msg = peer_read(tmpctx, peer->pps);
+
+	enum peer_wire type = fromwire_peektype(msg);
+
+	if (handle_peer_error(peer->pps, &peer->channel_id, msg))
+		return;
+
+	if(type != WIRE_COMMITMENT_SIGNED) {
+
+		DLOG("Spilcing got incorrect message from peer (should be WIRE_COMMITMENT_SIGNED");
+
+		peer_failed_warn(peer->pps, &peer->channel_id,
+				"Splicing got incorrect message from peer: %d "
+				"(should be WIRE_COMMITMENT_SIGNED)", type);
+	}
+
+	handle_peer_commit_sig(peer, msg);
+
+	msg = peer_read(tmpctx, peer->pps);
+
+	type = fromwire_peektype(msg);
+
+	if (handle_peer_error(peer->pps, &peer->channel_id, msg))
+		return;
+
+	if(type != WIRE_TX_SIGNATURES) {
+
+		DLOG("Splicing got incorrect message from peer (should be WIRE_TX_SIGNATURES)");
+
+		peer_failed_warn(peer->pps, &peer->channel_id,
+				"Splicing got incorrect message from peer: %d "
+				"(should be WIRE_TX_SIGNATURES)", type);
+	}
+
+	struct witness_stack **ws;
+	struct channel_id cid;
+	struct bitcoin_txid txid;
+
+	if (!fromwire_tx_signatures(tmpctx, msg, &cid, &txid,
+				    cast_const3(struct witness_stack ***, &ws))) {
+
+		peer_failed_warn(peer->pps, &peer->channel_id,
+			    "Splicing bad tx_signatures %s",
+			    tal_hex(msg, msg));
+	}
+
+	struct bitcoin_tx *bitcoin_tx;
+	struct bitcoin_signature splice_sig;
+
+	bitcoin_tx = bitcoin_tx_with_psbt(tmpctx, ictx.current_psbt);
+
+	msg = towire_hsmd_sign_splice_tx(tmpctx, bitcoin_tx,
+					 &peer->channel->funding_pubkey[REMOTE]);
+
+	msg = hsm_req(tmpctx, take(msg));
+	if (!fromwire_hsmd_sign_tx_reply(msg, &splice_sig))
+		status_failed(STATUS_FAIL_HSM_IO,
+			      "Reading sign_splice_tx reply: %s",
+			      tal_hex(tmpctx, msg));
+
+	status_debug("Creating splice signature %"PRIu64" %s for tx %s key %s",
+		     0ull,
+		     type_to_string(tmpctx, struct bitcoin_signature,
+				    &splice_sig),
+		     type_to_string(tmpctx, struct bitcoin_tx, bitcoin_tx),
+		     type_to_string(tmpctx, struct pubkey,
+				    &peer->channel->funding_pubkey[LOCAL]));
+
+	dump_htlcs(peer->channel, "Sending splice commit_sig!");
+
+	/* Set the splice_sig on the splice funding tx psbt */
+	if (!psbt_input_set_signature(ictx.current_psbt, 0,
+				      &peer->channel->funding_pubkey[LOCAL],
+				      &splice_sig))
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "Unable to set signature internally");
+
+	psbt_finalize(ictx.current_psbt);
+
+	ws = tal_arr(tmpctx, struct witness_stack *, 1);
+
+	tal_count(ws);
+
+	ws[0] = tal(tmpctx, struct witness_stack);
+
+	ws[0]->witness_element = tal_arr(tmpctx, struct witness_element *, 1);
+
+	ws[0]->witness_element[0] = tal(tmpctx, struct witness_element);
+
+	u8 der[73];
+
+	size_t der_len = signature_to_der(der, &splice_sig);
+
+	ws[0]->witness_element[0]->witness = tal_dup_arr(tmpctx,
+							 u8,
+							 der,
+							 der_len,
+							 0);
+
+	msg = towire_tx_signatures(tmpctx, &peer->channel_id,
+				   &outpoint.txid,
+				   (const struct witness_stack**)ws);
+
+	peer_write(peer->pps, take(msg));
+
+	int final_sigs_cnt =
+		psbt_finalize_multisig_signatures(tmpctx,
+						  &ictx.current_psbt->inputs[0]);
 }
 
 static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 {
 	const u8 *redeemscript;
+	const u8 *msg;
 	struct interactivetx_context ictx;
 	u32 sequence = 0;
-	struct wally_psbt_input *in;
-	struct wally_psbt_output *out;
 
 	ictx.ctx = peer;
 	ictx.our_role = TX_INITIATOR;
@@ -2309,8 +2570,6 @@ static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 	ictx.next_update = next_splice_step;
 	ictx.current_psbt = NULL;
 	ictx.desired_psbt = create_psbt(tmpctx, 0, 0, 0);
-
-	DLOG("We got the splice_ack messssaggggeee!!!");
 
 	/* We go first as the receiver of the ack.
 	 *
@@ -2332,17 +2591,13 @@ static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 	 *     - MUST `tx_add_input` an input which spends the current funding
 	 *       transaction output.
 	 */
-	in = psbt_append_input(ictx.desired_psbt, &peer->channel->funding, sequence,
-			       NULL, redeemscript, NULL);
-
-	psbt_input_set_serial_id(tmpctx, in, 69420);
+	psbt_append_input(ictx.desired_psbt, &peer->channel->funding, sequence,
+			  NULL, redeemscript, redeemscript);
 
 	/* Segwit requires us to store the value of the outpoint being spent,
 	 * so let's do that */
 
-	u8 *scriptPubkey = scriptpubkey_p2wsh(ictx.desired_psbt, redeemscript);
-
-	DLOG("handle_peer_splice_ack.7.1");
+	u8 *scriptPubkey = scriptpubkey_p2wsh(tmpctx, redeemscript);
 
 	psbt_input_set_wit_utxo(ictx.desired_psbt, 0,
 				scriptPubkey, peer->channel->funding_sats);
@@ -2356,19 +2611,219 @@ static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 	 *     - MUST `tx_add_output` a zero-value output which pays to the two
 	 *       funding keys using the higher of the two `generation` fields.
 	 */
-	out = psbt_append_output(ictx.desired_psbt,
-				 redeemscript,
-				 amount_sat(0));
+	psbt_append_output(ictx.desired_psbt,
+			   scriptpubkey_p2wsh(tmpctx, redeemscript),
+			   amount_sat(0));
 
-	psbt_output_set_serial_id(tmpctx, out, 420420);
+	psbt_add_serials(ictx.desired_psbt, ictx.our_role);
+	psbt_sort_by_serial_id(ictx.desired_psbt);
 
 	char *error = process_interactivetx_updates(&ictx);
 
-	if(error) {
-
-		peer_failed_err(peer->pps, &peer->channel_id,
+	if(error)
+		peer_failed_warn(peer->pps, &peer->channel_id,
 				"Interactive splicing error: %s", error);
+
+	//TODO: Calculate feerate correctly
+
+	// u32 ourFeerate = channel_feerate(peer->channel, LOCAL);
+	u32 theirFeerate = channel_feerate(peer->channel, REMOTE);
+
+	struct wally_tx_output *newChanOutpoint = &ictx.current_psbt->tx->outputs[0];
+
+	newChanOutpoint->satoshi = peer->channel->funding_sats.satoshis - 500;
+
+	//TODO: Do a bunch of checks
+	// * feerate is right
+	// * check everything
+	// * copy checks from dualfunding
+	// * if you have a check that isnt in the spec you should add it to spec
+
+	tal_wally_start();
+
+	psbt_elements_normalize_fees(ictx.current_psbt);
+
+	tal_wally_end(tal_steal(tmpctx, ictx.current_psbt));
+
+	struct bitcoin_outpoint outpoint;
+
+	psbt_txid(tmpctx, ictx.current_psbt, &outpoint.txid, NULL);
+
+	outpoint.n = 0; 
+	/* Todo find output index using redeem script & validate there
+	 * is only one */
+
+	struct amount_sat funding_sats, our_funding_sats;
+
+	funding_sats.satoshis = newChanOutpoint->satoshi;
+	our_funding_sats.satoshis = 0;
+
+	wire_sync_write(MASTER_FD,
+			towire_channeld_add_inflight(tmpctx,
+						     &outpoint.txid,
+						     outpoint.n,
+						     theirFeerate,
+						     funding_sats,
+						     our_funding_sats, /* <- todo */
+						     ictx.current_psbt));
+
+	peer->resend_all_commitments = true;
+
+	send_commit(peer);
+
+	struct bitcoin_tx *bitcoin_tx;
+	struct bitcoin_signature splice_sig;
+
+	bitcoin_tx = bitcoin_tx_with_psbt(tmpctx, ictx.current_psbt);
+
+	msg = towire_hsmd_sign_splice_tx(tmpctx, bitcoin_tx,
+					 &peer->channel->funding_pubkey[REMOTE]);
+
+	msg = hsm_req(tmpctx, take(msg));
+	if (!fromwire_hsmd_sign_tx_reply(msg, &splice_sig))
+		status_failed(STATUS_FAIL_HSM_IO,
+			      "Reading sign_splice_tx reply: %s",
+			      tal_hex(tmpctx, msg));
+
+	status_debug("Creating splice signature %"PRIu64" %s for tx %s redeemscript %s key %s",
+		     0ull,
+		     type_to_string(tmpctx, struct bitcoin_signature,
+				    &splice_sig),
+		     type_to_string(tmpctx, struct bitcoin_tx, bitcoin_tx),
+		     tal_hex(tmpctx, redeemscript),
+		     type_to_string(tmpctx, struct pubkey,
+				    &peer->channel->funding_pubkey[LOCAL]));
+
+	dump_htlcs(peer->channel, "Sending splice commit_sig!");
+
+	/* Set the splice_sig on the splice funding tx psbt */
+	if (!psbt_input_set_signature(ictx.current_psbt, 0,
+				      &peer->channel->funding_pubkey[LOCAL],
+				      &splice_sig))
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "Unable to set signature internally");
+
+	psbt_finalize(ictx.current_psbt);
+
+	struct witness_stack **ws = tal_arr(tmpctx, struct witness_stack *, 1);
+
+	tal_count(ws);
+
+	ws[0] = tal(tmpctx, struct witness_stack);
+
+	ws[0]->witness_element = tal_arr(tmpctx, struct witness_element *, 1);
+
+	ws[0]->witness_element[0] = tal(tmpctx, struct witness_element);
+
+	u8 der[73];
+
+	size_t der_len = signature_to_der(der, &splice_sig);
+
+	ws[0]->witness_element[0]->witness = tal_dup_arr(tmpctx,
+							 u8,
+							 der,
+							 der_len,
+							 0);
+
+	msg = towire_tx_signatures(tmpctx, &peer->channel_id,
+				   &outpoint.txid,
+				   (const struct witness_stack**)ws);
+
+	peer_write(peer->pps, take(msg));
+
+	/* Now we wait for responding tx_signatures msg */
+
+	msg = peer_read(tmpctx, peer->pps);
+
+	enum peer_wire type = fromwire_peektype(msg);
+
+	if (handle_peer_error(peer->pps, &peer->channel_id, msg))
+		return;
+
+	if(type != WIRE_COMMITMENT_SIGNED)
+		peer_failed_warn(peer->pps, &peer->channel_id,
+				"Splicing got incorrect message from peer: %d "
+				"(should be WIRE_COMMITMENT_SIGNED)", type);
+
+	handle_peer_commit_sig(peer, msg);
+
+	msg = peer_read(tmpctx, peer->pps);
+
+	type = fromwire_peektype(msg);
+
+	if (handle_peer_error(peer->pps, &peer->channel_id, msg))
+		return;
+
+	if(type != WIRE_REVOKE_AND_ACK)
+		peer_failed_warn(peer->pps, &peer->channel_id,
+				"Splicing got incorrect message from peer: %d "
+				"(should be WIRE_REVOKE_AND_ACK)", type);
+
+	handle_peer_revoke_and_ack(peer, msg);
+
+	msg = peer_read(tmpctx, peer->pps);
+
+	type = fromwire_peektype(msg);
+
+	if (handle_peer_error(peer->pps, &peer->channel_id, msg))
+		return;
+
+	if(type != WIRE_TX_SIGNATURES)
+		peer_failed_warn(peer->pps, &peer->channel_id,
+				"Splicing got incorrect message from peer: %d "
+				"(should be WIRE_TX_SIGNATURES)", type);
+
+	struct channel_id cid;
+	struct bitcoin_txid txid;
+
+	if (!fromwire_tx_signatures(tmpctx, msg, &cid, &txid,
+				    cast_const3(struct witness_stack ***, &ws)))
+		peer_failed_warn(peer->pps, &peer->channel_id,
+			    "Splicing bad tx_signatures %s",
+			    tal_hex(msg, msg));
+
+	struct bitcoin_signature their_sig;
+
+	their_sig.sighash_type = SIGHASH_ALL;
+
+	if(!signature_from_der(ws[0]->witness_element[0]->witness,
+			       tal_count(ws[0]->witness_element[0]->witness),
+			       &their_sig)) {
+
+		peer_failed_warn(peer->pps, &peer->channel_id,
+				 "Splicing bad tx_signatures %s",
+				 tal_hex(msg, msg));
 	}
+
+	struct pubkey *their_pubkey = &peer->channel->funding_pubkey[REMOTE];
+
+	/* Set the commit_sig on the commitment tx psbt */
+	if (!psbt_input_set_signature(ictx.current_psbt, 0,
+				      their_pubkey,
+				      &their_sig)) {
+
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "Unable to set signature internally");
+	}
+
+	psbt_input_set_witscript(ictx.current_psbt, 0, redeemscript);
+
+	int final_sigs_cnt =
+		psbt_finalize_multisig_signatures(tmpctx,
+						  &ictx.current_psbt->inputs[0]);
+
+	if(!psbt_finalize(ictx.current_psbt))
+		DLOG("Splice psbt_finalize failed");
+
+	struct bitcoin_tx *final_tx = bitcoin_tx_with_psbt(tmpctx, ictx.current_psbt);
+
+	status_debug("final_sigs_cnt: %d", final_sigs_cnt);
+
+	status_debug("Splice ack finished? with psbt: %s", psbt_to_b64(tmpctx, ictx.current_psbt));
+
+	u8* ptr = linearize_tx(tmpctx, final_tx);
+
+	status_debug("Splice ack tx hex: %s", tal_hex(tmpctx, ptr));
 }
 
 static void handle_splice_stfu_success(struct peer *peer)
@@ -3978,6 +4433,9 @@ static void req_in(struct peer *peer, const u8 *msg)
 	case WIRE_CHANNELD_LOCAL_CHANNEL_UPDATE:
 	case WIRE_CHANNELD_LOCAL_CHANNEL_ANNOUNCEMENT:
 	case WIRE_CHANNELD_LOCAL_PRIVATE_CHANNEL:
+	case WIRE_CHANNELD_ADD_INFLIGHT:
+	case WIRE_CHANNELD_GET_INFLIGHT:
+	case WIRE_CHANNELD_GOT_INFLIGHT:
 		break;
 	}
 	master_badmsg(-1, msg);

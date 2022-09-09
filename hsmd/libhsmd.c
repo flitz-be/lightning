@@ -105,6 +105,9 @@ bool hsmd_check_client_capabilities(struct hsmd_client *client,
 	case WIRE_HSMD_SIGN_MUTUAL_CLOSE_TX:
 		return (client->capabilities & HSM_CAP_SIGN_CLOSING_TX) != 0;
 
+	case WIRE_HSMD_SIGN_SPLICE_TX:
+		return true; //TODO: check capabilities
+
 	case WIRE_HSMD_SIGN_OPTION_WILL_FUND_OFFER:
 		return (client->capabilities & HSM_CAP_SIGN_WILL_FUND_OFFER) != 0;
 
@@ -1087,6 +1090,40 @@ static u8 *handle_sign_mutual_close_tx(struct hsmd_client *c, const u8 *msg_in)
 	return towire_hsmd_sign_tx_reply(NULL, &sig);
 }
 
+/* This is used by channeld to sign the final splice tx. */
+static u8 *handle_sign_splice_tx(struct hsmd_client *c, const u8 *msg_in)
+{
+	struct secret channel_seed;
+	struct bitcoin_tx *tx;
+	struct pubkey remote_funding_pubkey, local_funding_pubkey;
+	struct bitcoin_signature sig;
+	struct secrets secrets;
+	const u8 *funding_wscript;
+
+	if (!fromwire_hsmd_sign_splice_tx(tmpctx, msg_in,
+					  &tx,
+					  &remote_funding_pubkey))
+		return hsmd_status_malformed_request(c, msg_in);
+
+	tx->chainparams = c->chainparams;
+	/* FIXME: We should know dust level, decent fee range and
+	 * balances, and final_keyindex, and thus be able to check tx
+	 * outputs! */
+	get_channel_seed(&c->id, c->dbid, &channel_seed);
+	derive_basepoints(&channel_seed,
+			  &local_funding_pubkey, NULL, &secrets, NULL);
+
+	funding_wscript = bitcoin_redeem_2of2(tmpctx,
+					      &local_funding_pubkey,
+					      &remote_funding_pubkey);
+	sign_tx_input(tx, 0, NULL, funding_wscript,
+		      &secrets.funding_privkey,
+		      &local_funding_pubkey,
+		      SIGHASH_ALL, &sig);
+
+	return towire_hsmd_sign_tx_reply(NULL, &sig);
+}
+
 /*~ This is used when a commitment transaction is onchain, and has an HTLC
  * output paying to them, which has timed out; this signs that transaction,
  * which lightningd will broadcast to collect the funds. */
@@ -1597,6 +1634,8 @@ u8 *hsmd_handle_client_message(const tal_t *ctx, struct hsmd_client *client,
 		return handle_sign_withdrawal_tx(client, msg);
 	case WIRE_HSMD_SIGN_MUTUAL_CLOSE_TX:
 		return handle_sign_mutual_close_tx(client, msg);
+	case WIRE_HSMD_SIGN_SPLICE_TX:
+		return handle_sign_splice_tx(client, msg);
 	case WIRE_HSMD_SIGN_LOCAL_HTLC_TX:
 		return handle_sign_local_htlc_tx(client, msg);
 	case WIRE_HSMD_SIGN_REMOTE_HTLC_TX:

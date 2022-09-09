@@ -23,6 +23,7 @@
 #include <lightningd/peer_control.h>
 #include <lightningd/peer_fd.h>
 #include <wally_bip32.h>
+#include <wally_psbt.h>
 #include <fcntl.h>
 
 struct splice_command {
@@ -135,6 +136,61 @@ void notify_feerate_change(struct lightningd *ld)
 
 	/* FIXME: We choose not to drop to chain if we can't contact
 	 * peer.  We *could* do so, however. */
+}
+
+static void handle_add_inflight(struct lightningd *ld,
+				struct channel *channel,
+				const u8 *msg)
+{
+	struct bitcoin_outpoint outpoint;
+	u32 feerate;
+	struct amount_sat satoshis;
+	struct amount_sat our_funding_satoshis;
+	struct wally_psbt *psbt;
+
+	if(!fromwire_channeld_add_inflight(tmpctx,
+					   msg,
+					   &outpoint.txid,
+					   &outpoint.n,
+					   &feerate,
+					   &satoshis,
+					   &our_funding_satoshis,
+					   &psbt)) {
+
+		channel_internal_error(channel,
+				       "bad channel_add_inflight %s",
+				       tal_hex(channel, msg));
+		return;
+	}
+
+	struct channel_inflight *inflight;
+
+	struct bitcoin_signature last_sig;
+
+	memset(&last_sig, 0, sizeof(last_sig));
+
+	struct bitcoin_tx *bitcoin_tx;
+
+	/* bitcoin_tx isnt the incorrect tx here, but we push it for now 
+	 * to prevent crashes from code that depends on there being one */
+	bitcoin_tx = bitcoin_tx_with_psbt(tmpctx, psbt);
+
+	inflight = new_inflight(channel,
+				&outpoint,
+				feerate,
+				satoshis,
+				our_funding_satoshis,
+				psbt,
+				bitcoin_tx,
+				last_sig,
+				channel->lease_expiry,
+				channel->lease_commit_sig,
+				channel->lease_chan_max_msat,
+				channel->lease_chan_max_ppt,
+				0,
+				channel->push);
+
+	wallet_inflight_add(ld->wallet, inflight);
 }
 
 void channel_record_open(struct channel *channel, u32 blockheight, bool record_push)
@@ -528,6 +584,65 @@ static void handle_channel_upgrade(struct channel *channel,
 
 	wallet_channel_save(channel->peer->ld->wallet, channel);
 }
+
+static void handle_channel_get_inflight(struct channel *channel,
+					const u8 *msg)
+{
+	u8 *outMsg;
+	struct channel_inflight *inflight;
+	u32 index;
+	u32 i = 0;
+
+	if (!fromwire_channeld_get_inflight(msg, &index)) {
+		channel_internal_error(channel, "bad handle_channel_get_inflight: %s",
+				       tal_hex(tmpctx, msg));
+		return;
+	}
+
+	struct bitcoin_outpoint outpoint;
+	u32 theirFeerate = 0;
+	struct amount_sat funding_sats;
+	struct amount_sat our_funding_sats;
+	struct wally_psbt *psbt = create_psbt(tmpctx, 0, 0, 0);
+
+	funding_sats.satoshis = 0;
+	our_funding_sats.satoshis = 0;
+
+	memset(&outpoint.txid, 0, sizeof(outpoint.txid));
+	outpoint.n = 0;
+
+	list_for_each(&channel->inflights, inflight, list) {
+
+		if(i == index) {
+
+			// TODO: Fill in the rest of inflight data
+
+			outMsg = towire_channeld_got_inflight(NULL,
+							      true,
+							      &outpoint.txid,
+							      outpoint.n,
+							      theirFeerate,
+							      funding_sats,
+							      our_funding_sats,
+							      inflight->funding_psbt);
+
+			subd_send_msg(channel->owner, take(outMsg));
+
+			return;
+		}
+	}
+
+	outMsg = towire_channeld_got_inflight(NULL,
+					      false,
+					      &outpoint.txid,
+					      outpoint.n,
+					      theirFeerate,
+					      funding_sats,
+					      our_funding_sats,
+					      psbt);
+
+	subd_send_msg(channel->owner, take(outMsg));
+}
 #endif /* EXPERIMENTAL_FEATURES */
 
 static unsigned channel_msg(struct subd *sd, const u8 *msg, const int *fds)
@@ -578,6 +693,7 @@ static unsigned channel_msg(struct subd *sd, const u8 *msg, const int *fds)
 	case WIRE_CHANNELD_LOCAL_PRIVATE_CHANNEL:
 		handle_local_private_channel(sd->channel, msg);
 		break;
+#if EXPERIMENTAL_FEATURES
 	case WIRE_CHANNELD_SPLICE_CONFIRMED_INIT:
 	{
 		struct splice_command *cc;
@@ -586,20 +702,27 @@ static unsigned channel_msg(struct subd *sd, const u8 *msg, const int *fds)
 		list_for_each_safe(&sd->ld->splice_commands, cc, n, list) {
 			
 			struct json_stream *response = json_stream_success(cc->cmd);
-			// json_add_node_id(response, "id", id);
-			json_add_string(response, "message", "The channel was stfu'd!");
+			json_add_string(response, "message", "Splice tester ran");
 
 			was_pending(command_success(cc->cmd, response));
-		}
 
-		// log_debug(sd->channel->log, "WIRE_CHANNELD_SPLICE_INIT inside channel_control.c");
+			list_del(&cc->list);
+		}
 		break;
 	}
-#if EXPERIMENTAL_FEATURES
+	case WIRE_CHANNELD_ADD_INFLIGHT:
+		handle_add_inflight(sd->ld, sd->channel, msg);
+		return 0;
 	case WIRE_CHANNELD_UPGRADED:
 		handle_channel_upgrade(sd->channel, msg);
 		break;
+	case WIRE_CHANNELD_GET_INFLIGHT:
+		handle_channel_get_inflight(sd->channel, msg);
+		break;
 #else
+	case WIRE_CHANNELD_GET_INFLIGHT:
+	case WIRE_CHANNELD_SPLICE_CONFIRMED_INIT:
+	case WIRE_CHANNELD_ADD_INFLIGHT:
 	case WIRE_CHANNELD_UPGRADED:
 #endif
 	/* And we never get these from channeld. */
@@ -619,6 +742,7 @@ static unsigned channel_msg(struct subd *sd, const u8 *msg, const int *fds)
 	case WIRE_CHANNELD_CHANNEL_UPDATE:
 	case WIRE_CHANNELD_DEV_MEMLEAK:
 	case WIRE_CHANNELD_DEV_QUIESCE:
+	case WIRE_CHANNELD_GOT_INFLIGHT:
 		/* Replies go to requests. */
 	case WIRE_CHANNELD_OFFER_HTLC_REPLY:
 	case WIRE_CHANNELD_DEV_REENABLE_COMMIT_REPLY:
@@ -1173,9 +1297,11 @@ static struct command_result *json_splice_init(struct command *cmd,
 				    "by peer");
 	}
 
-	cc = tal(cmd, struct splice_command);
+	cc = tal(NULL, struct splice_command);
+	
 	list_add_tail(&cmd->ld->splice_commands, &cc->list);
-	cc->cmd = cmd;
+
+	cc->cmd = tal_steal(cc, cmd);
 	cc->channel = channel;
 
 	assert(channel);
@@ -1183,12 +1309,7 @@ static struct command_result *json_splice_init(struct command *cmd,
 
 	msg = towire_channeld_splice_init(NULL);
 
-	subd_send_msg(channel->owner, take(msg)); // <-- crash here. 
-// * thread #1, queue = 'com.apple.main-thread', stop reason = EXC_BAD_ACCESS (code=1, address=0x58)
-//    831 		 FIXME: We should use unique upper bits for each daemon, then
-//    832 		 * have generate-wire.py add them, just assert here. 
-// -> 833 		assert(!strstarts(sd->msgname(type), "INVALID"));
-
+	subd_send_msg(channel->owner, take(msg));
 
 	return command_still_pending(cmd);
 }
@@ -1201,6 +1322,58 @@ static const struct json_command splice_init_command = {
 	"Returns updated {psbt} with (partial) contributions from peer"
 };
 AUTODATA(json_command, &splice_init_command);
+
+// ^ Don't start negotiating with peer
+
+// static const struct json_command splice_update_command = {
+// 	"splice_update",
+// 	"channels",
+// 	json_splice_update,
+// 	"Update {channel_id} currently active negotiated splice with {psbt}. "
+// 	""
+// 	"Returns updated {psbt} with (partial) contributions from peer. "
+// 	"If {commitments_secured} is true, next call should be to splicechannel_signed"
+// };
+// AUTODATA(json_command, &splice_update_command);
+
+// ^ Go send this to peer, return what the peer gave back
+// User keeps calling update until it's done
+// commitments_secured <-> tx_complete by both sides
+// User takes result and adds it to our psbt and send it back in
+
+// See dual funding 
+
+// RBFs can just be new splices
+// -> calculate feerate is high enough
+
+/*
+static const struct json_command splice_signed_command = {
+	"splice_signed",
+	"channels",
+	json_splice_signed,
+	"Send our {signed_psbt}'s tx sigs for {channel_id}."
+};
+
+static const struct json_command splice_bump_command = {
+	"splice_bump",
+	"channels",
+	json_splice_bump,
+	"Attempt to bump the fee on {channel_id}'s funding transaction."
+};
+
+static const struct json_command splice_abort_command = {
+	"splice_abort",
+	"channels",
+	json_splice_abort,
+	"Abort {channel_id}'s open. Usable while `commitment_signed=false`."
+};
+*/
+/*
+AUTODATA(json_command, &splice_update_command);
+AUTODATA(json_command, &splice_signed_command);
+AUTODATA(json_command, &splice_bump_command);
+AUTODATA(json_command, &splice_abort_command);
+*/
 
 #if DEVELOPER
 static struct command_result *json_dev_feerate(struct command *cmd,
