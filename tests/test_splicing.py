@@ -17,23 +17,33 @@ def find_next_feerate(node, peer):
 
 @unittest.skipIf(TEST_NETWORK != 'regtest', 'elementsd doesnt yet support PSBT features we need')
 @pytest.mark.openchannel('v2')
-@pytest.mark.developer("requres 'dev-queryrates'")
+@pytest.mark.developer("uses dev-disconnect")
 def test_splice(node_factory, bitcoind):
+
     l1 = node_factory.get_node()
     l2 = node_factory.get_node()
     
     l1.rpc.connect(l2.rpc.getinfo()['id'], 'localhost:%d' % l2.port)
     l1.openchannel(l2, 4000000)
 
-    inv = l2.rpc.invoice(10, '1', 'no_1')
-    l1.rpc.pay(inv['bolt11'])
+    # inv = l2.rpc.invoice(10, '1', 'no_1')
+    # l1.rpc.pay(inv['bolt11'])
 
-    ret = l1.rpc.ping(l2.info['id'], 0, 0)
-    assert ret['totlen'] == 4
+    # ret = l1.rpc.ping(l2.info['id'], 0, 0)
+    # assert ret['totlen'] == 4
 
-    l1.rpc.splice_init(l2.info['id'])
+    # l1.rpc.splice_init(l2.info['id'])
+
+    l2.daemon.wait_for_log(r'to CHANNELD_NORMAL')
+    l1.daemon.wait_for_log(r'to CHANNELD_NORMAL')
 
     result = True
+
+
+
+
+
+
     # l1, l2 = node_factory.get_nodes(2)
 
     # amount = 10 ** 6

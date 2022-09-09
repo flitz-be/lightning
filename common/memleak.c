@@ -347,6 +347,9 @@ bool dump_memleak(struct htable *memtable,
 	const uintptr_t *backtrace;
 	bool found_leak = false;
 
+	/* uncomment below to skip memleak checks */
+	// return found_leak;
+
 	while ((i = memleak_get(memtable, &backtrace)) != NULL) {
 		print("MEMLEAK: %p", i);
 		if (tal_name(i))

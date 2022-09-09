@@ -3795,6 +3795,11 @@ int main(int argc, char *argv[])
 {
 	common_setup(argv[0]);
 
+	// int wait_for_1 = 0;
+
+	// while(wait_for_1 != 1)
+	// 	sleep(1);
+
 	struct pollfd pollfd[2];
 	struct state *state = tal(NULL, struct state);
 	struct secret *none;
