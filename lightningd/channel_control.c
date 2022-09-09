@@ -1089,6 +1089,7 @@ static unsigned channel_msg(struct subd *sd, const u8 *msg, const int *fds)
 	case WIRE_CHANNELD_GET_INFLIGHT:
 		handle_channel_get_inflight(sd->channel, msg);
 		break;
+	case WIRE_CHANNELD_INFLIGHT_MINDEPTH:
 #else
 	case WIRE_CHANNELD_GET_INFLIGHT:
 	case WIRE_CHANNELD_SPLICE_CONFIRMED_INIT:
@@ -1147,7 +1148,7 @@ bool peer_start_channeld(struct channel *channel,
 	struct secret last_remote_per_commit_secret;
 	secp256k1_ecdsa_signature *remote_ann_node_sig, *remote_ann_bitcoin_sig;
 	struct penalty_base *pbases;
-	u32 inflight_count;
+	u32 inflight_count = 0;
 	struct channel_inflight *inflight;
 
 	hsmfd = hsm_get_client_fd(ld, &channel->peer->id,
@@ -1246,6 +1247,7 @@ bool peer_start_channeld(struct channel *channel,
 				       "Could not derive final_ext_key %"PRIu64,
 				       channel->final_key_idx);
 		return false;
+	}
 
 	list_for_each(&channel->inflights, inflight, list) {
 		inflight_count++;

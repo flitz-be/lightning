@@ -633,7 +633,7 @@ struct channel *active_channel_by_id(struct lightningd *ld,
 
 	if (uc)
 		*uc = peer->uncommitted_channel;
-	return peer_active_channel(peer);
+	return peer_any_active_channel(peer, NULL);
 }
 
 struct channel *unsaved_channel_by_id(struct lightningd *ld,
@@ -642,16 +642,7 @@ struct channel *unsaved_channel_by_id(struct lightningd *ld,
 	struct peer *peer = peer_by_id(ld, id);
 	if (!peer)
 		return NULL;
-	return peer_unsaved_channel(peer);
-}
-
-struct channel *active_channel_by_scid(struct lightningd *ld,
-				       const struct short_channel_id *scid)
-{
-	struct channel *chan = any_channel_by_scid(ld, scid);
-	if (chan && !channel_active(chan))
-		chan = NULL;
-	return chan;
+	return peer_any_unsaved_channel(peer, NULL);
 }
 
 struct channel *any_channel_by_scid(struct lightningd *ld,
