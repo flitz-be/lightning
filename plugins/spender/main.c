@@ -3,6 +3,7 @@
 #include <plugins/spender/multifundchannel.h>
 #include <plugins/spender/multiwithdraw.h>
 #include <plugins/spender/openchannel.h>
+#include <unistd.h>
 
 /*~ The spender plugin contains various commands that handle
  * spending from the onchain wallet.  */
@@ -19,6 +20,11 @@ int main(int argc, char **argv)
 {
 	struct plugin_command *commands;
 	struct plugin_notification *notifs;
+
+	// int waitfor1 = 0;
+
+	// while(waitfor1 != 1)
+	// 	sleep(1);
 
 	setup_locale();
 
