@@ -1510,12 +1510,13 @@ bool routing_add_channel_update(struct routing_state *rstate,
 	}
 
 	status_peer_debug(peer ? &peer->id : NULL,
-			  "Received %schannel_update for channel %s/%d now %s",
+			  "Received %schannel_update for channel %s/%d now %s%s",
 			  ignore_timestamp ? "(forced) " : "",
 			  type_to_string(tmpctx, struct short_channel_id,
 					 &short_channel_id),
 			  channel_flags & 0x01,
-			  channel_flags & ROUTING_FLAGS_DISABLED ? "DISABLED" : "ACTIVE");
+			  channel_flags & ROUTING_FLAGS_DISABLED ? "DISABLED" : "ACTIVE",
+			  channel_flags & ROUTING_FLAGS_SPLICING ? " SPLICING" : "");
 
 	return true;
 }

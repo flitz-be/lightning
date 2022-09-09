@@ -91,6 +91,7 @@ msgtype,channeld_funding_depth,1002
 msgdata,channeld_funding_depth,short_channel_id,?short_channel_id,
 msgdata,channeld_funding_depth,alias_local,?short_channel_id,
 msgdata,channeld_funding_depth,depth,u32,
+msgdata,channeld_funding_depth,splicing,bool,
 
 # Tell channel to offer this htlc
 msgtype,channeld_offer_htlc,1004
@@ -121,6 +122,10 @@ msgdata,channeld_fail_htlc,failed_htlc,failed_htlc,
 msgtype,channeld_got_funding_locked,1019
 msgdata,channeld_got_funding_locked,next_per_commit_point,pubkey,
 msgdata,channeld_got_funding_locked,alias,?short_channel_id,
+
+# When we receive funding_locked.
+msgtype,channeld_got_splice_locked,1119
+msgdata,channeld_got_splice_locked,next_per_commit_point,pubkey,
 
 #include <common/penalty_base.h>
 
@@ -221,6 +226,7 @@ msgdata,channeld_splice_signed,psbt,wally_psbt,
 # channeld->master: Signed psbt is completed
 msgtype,channeld_splice_confirmed_signed,7213
 msgdata,channeld_splice_confirmed_signed,tx,bitcoin_tx,
+msgdata,channeld_splice_confirmed_signed,input_index,u32,
 
 # channeld->master: Add an inflight to the DB
 msgtype,channeld_add_inflight,7214

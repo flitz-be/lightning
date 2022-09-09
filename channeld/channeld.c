@@ -625,7 +625,8 @@ static void channel_announcement_negotiate(struct peer *peer)
 	/* If we've completed the signature exchange, we can send a real
 	 * announcement, otherwise we send a temporary one */
 	if (peer->have_sigs[LOCAL] && peer->have_sigs[REMOTE]) {
-		check_short_ids_match(peer);
+		// check_short_ids_match(peer);
+		(void)check_short_ids_match;
 
 		/* After making sure short_channel_ids match, we can send remote
 		 * announcement to MASTER. */
@@ -641,10 +642,53 @@ static void channel_announcement_negotiate(struct peer *peer)
 	}
 }
 
+static void handle_peer_splice_locked(struct peer *peer, const u8 *msg)
+{
+	struct channel_id chanid;
+
+	DLOG("Got handle_peer_splice_locked!!!");
+
+	peer->old_remote_per_commit = peer->remote_per_commit;
+	if (!fromwire_splice_locked(msg, &chanid,
+				    &peer->remote_per_commit))
+		peer_failed_warn(peer->pps, &peer->channel_id,
+				 "Bad splice_locked %s", tal_hex(msg, msg));
+
+	// TODO: check that the new channel id is in our inflights?
+
+	// if (!channel_id_eq(&chanid, &peer->channel_id))
+	// 	peer_failed_err(peer->pps, &chanid,
+	// 			"Wrong channel id in %s (expected %s)",
+	// 			tal_hex(tmpctx, msg),
+	// 			type_to_string(msg, struct channel_id,
+	// 				       &peer->channel_id));
+
+	/* TODO: delete all the things
+	 * 1) delete all inflights
+	 * 2) delete all HTLCs for old funding tx
+	 * On confirm create a new channel entry -> add all HTLC stuff there
+	 * maybe add HTLC to htlc database but they point to inflight instead
+	 * -> mark the old channel db object as closed (gets deleted at 100)
+	 * 
+	*/
+
+	// TODO: Invent a place to put HTLCs for pending splice tx
+
+	wire_sync_write(MASTER_FD,
+			take(towire_channeld_got_splice_locked(NULL,
+						&peer->remote_per_commit)));
+
+	channel_announcement_negotiate(peer);
+	billboard_update(peer);
+}
+
 static void handle_peer_funding_locked(struct peer *peer, const u8 *msg)
 {
 	struct channel_id chanid;
 	struct tlv_funding_locked_tlvs *tlvs;
+
+	DLOG("Trying handle_peer_funding_locked");
+
 	/* BOLT #2:
 	 *
 	 * A node:
@@ -658,6 +702,8 @@ static void handle_peer_funding_locked(struct peer *peer, const u8 *msg)
 	/* Too late, we're shutting down! */
 	if (peer->shutdown_sent[LOCAL])
 		return;
+
+	DLOG("handle_peer_funding_locked past checks");
 
 	peer->old_remote_per_commit = peer->remote_per_commit;
 	if (!fromwire_funding_locked(msg, msg, &chanid,
@@ -1891,7 +1937,7 @@ static void handle_peer_commit_sig(struct peer *peer, const u8 *msg)
 	struct tlv_commitment_signed_tlvs *cs_tlv
 		= tlv_commitment_signed_tlvs_new(tmpctx);
 	if (!fromwire_commitment_signed(tmpctx, msg,
-					&channel_id, &commit_sig.s, &raw_sigs, cs_tlv))
+					&channel_id, &commit_sig.s, &raw_sigs, &cs_tlv))
 #else
 	if (!fromwire_commitment_signed(tmpctx, msg,
 					&channel_id, &commit_sig.s, &raw_sigs))
@@ -2412,7 +2458,7 @@ static void handle_unexpected_tx_sigs(struct peer *peer, const u8 *msg)
 	 * but they did not receive our funding_locked. */
 	if (!fromwire_tx_signatures(tmpctx, msg, &cid, &txid,
 				    cast_const3(struct witness_stack ***, &ws),
-				    txsig_tlvs))
+				    &txsig_tlvs))
 		peer_failed_warn(peer->pps, &peer->channel_id,
 			    "Bad tx_signatures %s",
 			    tal_hex(msg, msg));
@@ -2645,6 +2691,8 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 
 	int chan_output_index = 0;
 
+	// TODO: Calculate chan_output_index for cases where it's not index 0
+
 	struct wally_tx_output *newChanOutpoint = &ictx.current_psbt->tx->outputs[chan_output_index];
 
 	u64 total_in = 0;
@@ -2778,8 +2826,11 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 				      (const struct witness_stack**)outws,
 				      tlv_txsigs_tlvs);
 
-	if (do_i_sign_first(peer, &ictx))
+	if (do_i_sign_first(peer, &ictx)) {
+
 		peer_write(peer->pps, sigmsg);
+		//TODO: Add transaction to inflights even though its missing the other signature
+	}
 
 	msg = peer_read(tmpctx, peer->pps);
 
@@ -2797,7 +2848,7 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 
 	if (!fromwire_tx_signatures(tmpctx, msg, &cid, &txid,
 				    cast_const3(struct witness_stack ***, &inws),
-				    txsig_tlvs))
+				    &txsig_tlvs))
 		peer_failed_warn(peer->pps, &peer->channel_id,
 			    "Splicing bad tx_signatures %s",
 			    tal_hex(msg, msg));
@@ -2894,6 +2945,13 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 
 	if (!do_i_sign_first(peer, &ictx))
 		peer_write(peer->pps, sigmsg);
+	else {
+
+		// TODO: Update the inflight transaction to have their sigs in it
+		// Keep in mind we need to make two inflight thingies now:
+		// * add to inflight
+		// * update inflight
+	}
 
 	struct bitcoin_tx *final_tx = bitcoin_tx_with_psbt(tmpctx,
 							   ictx.current_psbt);
@@ -2916,8 +2974,10 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 
 	// no witness stack at all!
 
-	msg = towire_channeld_splice_confirmed_signed(tmpctx, final_tx);
+	msg = towire_channeld_splice_confirmed_signed(tmpctx, final_tx, chan_output_index);
 	wire_sync_write(MASTER_FD, take(msg));
+
+	send_channel_update(peer, 0);
 }
 
 static struct bitcoin_tx *bitcoin_tx_from_txid(struct peer *peer,
@@ -3231,6 +3291,8 @@ static void handle_splice_signed(struct peer *peer, const u8 *inmsg)
 
 	int chan_output_index = 0;
 
+	// TODO: Calculate chan_output_index for cases where it's not index 0
+
 	struct wally_tx_output *newChanOutpoint =
 		&signed_psbt->tx->outputs[chan_output_index];
 
@@ -3402,7 +3464,7 @@ static void handle_splice_signed(struct peer *peer, const u8 *inmsg)
 
 	if (!fromwire_tx_signatures(tmpctx, msg, &cid, &txid,
 				    cast_const3(struct witness_stack ***, &ws),
-				    txsig_tlvs))
+				    &txsig_tlvs))
 		peer_failed_warn(peer->pps, &peer->channel_id,
 			    "Splicing bad tx_signatures %s",
 			    tal_hex(msg, msg));
@@ -3504,17 +3566,11 @@ static void handle_splice_signed(struct peer *peer, const u8 *inmsg)
 	struct bitcoin_tx *final_tx = bitcoin_tx_with_psbt(tmpctx,
 							   signed_psbt);
 
-	outmsg = towire_channeld_splice_confirmed_signed(tmpctx, final_tx);
+	outmsg = towire_channeld_splice_confirmed_signed(tmpctx, final_tx,
+							 chan_output_index);
 	wire_sync_write(MASTER_FD, take(outmsg));
-
-	// TODO: publish the splice tx
-
-	// TODO: Get notified of splice tx confirm depth
-
-	// lightningd/peer_control.c
-	// -> fudning_depth_cb
-	// channel_watch_inflight
-
+	
+	send_channel_update(peer, 0);
 }
 
 static void handle_splice_stfu_success(struct peer *peer)
@@ -3611,6 +3667,9 @@ static void peer_in(struct peer *peer, const u8 *msg)
 		return;
 	case WIRE_SPLICE_ACK:
 		handle_peer_splice_ack(peer, msg);
+		return;
+	case WIRE_SPLICE_LOCKED:
+		handle_peer_splice_locked(peer, msg);
 		return;
 #endif
 	case WIRE_INIT:
@@ -4584,13 +4643,21 @@ static void handle_funding_depth(struct peer *peer, const u8 *msg)
 	struct short_channel_id *scid, *alias_local;
 	struct tlv_funding_locked_tlvs *tlvs;
 	struct pubkey point;
+	bool splicing;
 
 	if (!fromwire_channeld_funding_depth(tmpctx,
 					     msg,
 					     &scid,
 					     &alias_local,
-					     &depth))
+					     &depth,
+					     &splicing))
 		master_badmsg(WIRE_CHANNELD_FUNDING_DEPTH, msg);
+
+	char buf[2048];
+
+	sprintf(buf, "Got funding depth message with depth: %d", (int)depth);
+
+	DLOG(buf);
 
 	/* Too late, we're shutting down! */
 	if (peer->shutdown_sent[LOCAL])
@@ -4630,6 +4697,23 @@ static void handle_funding_depth(struct peer *peer, const u8 *msg)
 			peer_write(peer->pps, take(msg));
 
 			peer->funding_locked[LOCAL] = true;
+		}
+		else {
+			assert(scid);
+			assert(splicing);
+			peer->short_channel_ids[LOCAL] = *scid;
+
+			status_debug("funding_locked: sending commit index"
+				     " %"PRIu64": %s",
+				     peer->next_index[LOCAL],
+				     type_to_string(tmpctx, struct pubkey,
+						    &peer->next_local_per_commit));
+
+			msg = towire_splice_locked(NULL,
+						   &peer->channel_id,
+						   &peer->next_local_per_commit);
+
+			peer_write(peer->pps, take(msg));
 		}
 
 		peer->announce_depth_reached = (depth >= ANNOUNCE_MIN_DEPTH);
@@ -5118,6 +5202,7 @@ static void req_in(struct peer *peer, const u8 *msg)
 	case WIRE_CHANNELD_GOT_COMMITSIG_REPLY:
 	case WIRE_CHANNELD_GOT_REVOKE_REPLY:
 	case WIRE_CHANNELD_GOT_FUNDING_LOCKED:
+	case WIRE_CHANNELD_GOT_SPLICE_LOCKED:
 	case WIRE_CHANNELD_GOT_ANNOUNCEMENT:
 	case WIRE_CHANNELD_GOT_SHUTDOWN:
 	case WIRE_CHANNELD_SHUTDOWN_COMPLETE:

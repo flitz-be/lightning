@@ -513,7 +513,8 @@ static u8 *create_unsigned_update(const tal_t *ctx,
 				  struct amount_msat htlc_minimum,
 				  struct amount_msat htlc_maximum,
 				  u32 fee_base_msat,
-				  u32 fee_proportional_millionths)
+				  u32 fee_proportional_millionths,
+				  bool splicing)
 {
 	secp256k1_ecdsa_signature dummy_sig;
 	u8 message_flags, channel_flags;
@@ -532,10 +533,13 @@ static u8 *create_unsigned_update(const tal_t *ctx,
 	 * | ------------- | ----------- | -------------------------------- |
 	 * | 0             | `direction` | Direction this update refers to. |
 	 * | 1             | `disable`   | Disable the channel.             |
+	 * | 2             | `splicing`  | Temporarily ignore channel spend.|
 	 */
 	channel_flags = direction;
 	if (disable)
 		channel_flags |= ROUTING_FLAGS_DISABLED;
+	if(splicing)
+		channel_flags |= ROUTING_FLAGS_SPLICING;
 
 	/* BOLT #7:
 	 *
@@ -755,6 +759,7 @@ void refresh_local_channel(struct daemon *daemon,
 	 * | ------------- | ----------- | -------------------------------- |
 	 * | 0             | `direction` | Direction this update refers to. |
 	 * | 1             | `disable`   | Disable the channel.             |
+	 * | 2             | `splicing`  | Temporarily ignore channel spend.|
 	 */
 	if (direction != (channel_flags & ROUTING_FLAGS_DIRECTION)) {
 		status_broken("Wrong channel direction %s!",
@@ -770,7 +775,8 @@ void refresh_local_channel(struct daemon *daemon,
 					false, cltv_expiry_delta,
 					htlc_minimum, htlc_maximum,
 					fee_base_msat,
-					fee_proportional_millionths);
+					fee_proportional_millionths,
+					channel_flags & ROUTING_FLAGS_SPLICING);
 	sign_timestamp_and_apply_update(daemon, chan, direction, take(update));
 }
 
@@ -787,11 +793,13 @@ void handle_local_channel_update(struct daemon *daemon, const u8 *msg)
 	int direction;
 	u8 *unsigned_update;
 	const struct half_chan *hc;
+	bool splicing;
 
 	if (!fromwire_gossipd_local_channel_update(msg,
 						   &id,
 						   &scid,
 						   &disable,
+						   &splicing,
 						   &cltv_expiry_delta,
 						   &htlc_minimum,
 						   &fee_base_msat,
@@ -821,7 +829,8 @@ void handle_local_channel_update(struct daemon *daemon, const u8 *msg)
 						 disable, cltv_expiry_delta,
 						 htlc_minimum, htlc_maximum,
 						 fee_base_msat,
-						 fee_proportional_millionths);
+						 fee_proportional_millionths,
+						 splicing);
 
 	hc = &chan->half[direction];
 

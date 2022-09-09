@@ -559,6 +559,7 @@ static void handle_recv_gossip(struct daemon *daemon, const u8 *outermsg)
 	case WIRE_STFU:
 	case WIRE_SPLICE:
 	case WIRE_SPLICE_ACK:
+	case WIRE_SPLICE_LOCKED:
 #endif
 		break;
 	}
