@@ -49,6 +49,8 @@ static bool unknown_type(enum peer_wire t)
 	case WIRE_ACK_RBF:
 #if EXPERIMENTAL_FEATURES
 	case WIRE_STFU:
+	case WIRE_SPLICE:
+	case WIRE_SPLICE_ACK:
 #endif
 		return false;
 	}
@@ -103,6 +105,64 @@ bool is_msg_for_gossipd(const u8 *cursor)
 	case WIRE_ONION_MESSAGE:
 #if EXPERIMENTAL_FEATURES
 	case WIRE_STFU:
+	case WIRE_SPLICE:
+	case WIRE_SPLICE_ACK:
+#endif
+		break;
+	}
+	return false;
+}
+
+bool is_msg_gossip_broadcast(const u8 *cursor)
+{
+	switch ((enum peer_wire)fromwire_peektype(cursor)) {
+	case WIRE_CHANNEL_ANNOUNCEMENT:
+	case WIRE_NODE_ANNOUNCEMENT:
+	case WIRE_CHANNEL_UPDATE:
+		return true;
+	case WIRE_QUERY_SHORT_CHANNEL_IDS:
+	case WIRE_REPLY_SHORT_CHANNEL_IDS_END:
+	case WIRE_QUERY_CHANNEL_RANGE:
+	case WIRE_REPLY_CHANNEL_RANGE:
+	case WIRE_ONION_MESSAGE:
+	case WIRE_OBS2_ONION_MESSAGE:
+	case WIRE_WARNING:
+	case WIRE_INIT:
+	case WIRE_PING:
+	case WIRE_PONG:
+	case WIRE_ERROR:
+	case WIRE_OPEN_CHANNEL:
+	case WIRE_ACCEPT_CHANNEL:
+	case WIRE_FUNDING_CREATED:
+	case WIRE_FUNDING_SIGNED:
+	case WIRE_FUNDING_LOCKED:
+	case WIRE_SHUTDOWN:
+	case WIRE_CLOSING_SIGNED:
+	case WIRE_UPDATE_ADD_HTLC:
+	case WIRE_UPDATE_FULFILL_HTLC:
+	case WIRE_UPDATE_FAIL_HTLC:
+	case WIRE_UPDATE_FAIL_MALFORMED_HTLC:
+	case WIRE_COMMITMENT_SIGNED:
+	case WIRE_REVOKE_AND_ACK:
+	case WIRE_UPDATE_FEE:
+	case WIRE_UPDATE_BLOCKHEIGHT:
+	case WIRE_CHANNEL_REESTABLISH:
+	case WIRE_ANNOUNCEMENT_SIGNATURES:
+	case WIRE_GOSSIP_TIMESTAMP_FILTER:
+	case WIRE_TX_ADD_INPUT:
+	case WIRE_TX_REMOVE_INPUT:
+	case WIRE_TX_ADD_OUTPUT:
+	case WIRE_TX_REMOVE_OUTPUT:
+	case WIRE_TX_COMPLETE:
+	case WIRE_TX_SIGNATURES:
+	case WIRE_OPEN_CHANNEL2:
+	case WIRE_ACCEPT_CHANNEL2:
+	case WIRE_INIT_RBF:
+	case WIRE_ACK_RBF:
+#if EXPERIMENTAL_FEATURES
+	case WIRE_STFU:
+	case WIRE_SPLICE:
+	case WIRE_SPLICE_ACK:
 #endif
 		break;
 	}
@@ -344,6 +404,23 @@ bool extract_channel_id(const u8 *in_pkt, struct channel_id *channel_id)
 		 * 1. type: 2 (`stfu`)
 		 * 2. data:
 		 *     * [`channel_id`:`channel_id`]
+		 */
+	case WIRE_SPLICE:
+		/* BOLT-splice #2:
+		 * 1. type: 74 (`splice`)
+		 * 2. data:
+		 *     * [`chain_hash`:`chain_hash`]
+		 *     * [`channel_id`:`channel_id`]
+		 *     * [`u32`:`funding_feerate_perkw`]
+		 *     * [`point`:`funding_pubkey`]
+		 */
+	case WIRE_SPLICE_ACK:
+		/* BOLT-splice #2:
+		 * 1. type: 76 (`splice_ack`)
+		 * 2. data:
+		 *     * [`chain_hash`:`chain_hash`]
+		 *     * [`channel_id`:`channel_id`]
+		 *     * [`point`:`funding_pubkey`]
 		 */
 #endif
 		return fromwire_channel_id(&cursor, &max, channel_id);

@@ -182,6 +182,13 @@ msgdata,channeld_got_revoke,penalty_tx,?bitcoin_tx,
 msgtype,channeld_got_revoke_reply,1122
 
 #include <wally_bip32.h>
+
+# master->channeld: hello, I'd like to start a channel splice open
+msgtype,channeld_splice_init,7204
+
+# master->channeld: hello, I started a channel splice open
+msgtype,channeld_splice_confirmed_init,7206
+
 # Tell peer to shut down channel.
 msgtype,channeld_send_shutdown,1023
 msgdata,channeld_send_shutdown,final_index,?u32,

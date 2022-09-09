@@ -11,6 +11,7 @@
  *    limits, unlikely as that is.
  */
 #include "config.h"
+#include <bitcoin/script.h>
 #include <ccan/asort/asort.h>
 #include <ccan/cast/cast.h>
 #include <ccan/mem/mem.h>
@@ -22,10 +23,12 @@
 #include <common/billboard.h>
 #include <common/ecdh_hsmd.h>
 #include <common/gossip_store.h>
+#include <common/interactivetx.h>
 #include <common/key_derive.h>
 #include <common/memleak.h>
 #include <common/msg_queue.h>
 #include <common/onionreply.h>
+#include <common/psbt_open.h>
 #include <common/peer_billboard.h>
 #include <common/peer_failed.h>
 #include <common/peer_io.h>
@@ -197,6 +200,8 @@ struct peer {
 
 	/* Most recent channel_update message. */
 	u8 *channel_update;
+
+	void (*on_stfu_success)(struct peer*);
 };
 
 static u8 *create_channel_announcement(const tal_t *ctx, struct peer *peer);
@@ -245,6 +250,12 @@ static void maybe_send_stfu(struct peer *peer)
 		status_unusual("STFU complete: we are quiescent");
 		wire_sync_write(MASTER_FD,
 				towire_channeld_dev_quiesce_reply(tmpctx));
+
+		if(peer->on_stfu_success) {
+
+			peer->on_stfu_success(peer);
+			peer->on_stfu_success = NULL;
+		}
 	}
 }
 
@@ -2205,6 +2216,164 @@ static void handle_unexpected_reestablish(struct peer *peer, const u8 *msg)
 				       &channel_id));
 }
 
+static struct wally_psbt *next_splice_step(struct interactivetx_context *ictx)
+{
+	/* Accepter accepts everything for now. */
+	if(ictx->our_role == TX_ACCEPTER) {
+
+		DLOG("Accepter is returning NULL");
+		return NULL;
+	}
+
+	return ictx->desired_psbt;
+}
+
+static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
+{
+	u8 *msg;
+	struct interactivetx_context ictx;
+
+	msg = towire_splice_ack(NULL, &peer->channel_id);
+	peer_write(peer->pps, take(msg));
+
+	/* Now we wait for the other side to go first.
+	 *
+	 * BOLT #2:
+	 *   The receiver of `splice_ack`:
+	 *    - MUST begin splice negotiation.
+	 */
+
+	ictx.ctx = peer;
+	ictx.our_role = TX_ACCEPTER;
+	ictx.pps = peer->pps;
+	ictx.channel_id = peer->channel_id;
+	ictx.tx_msg_count[0] = 0;
+	ictx.tx_msg_count[1] = 0;
+	ictx.tx_msg_count[2] = 0;
+	ictx.tx_msg_count[3] = 0;
+	assert(INTERACTIVETX_NUM_TX_MSGS == 4);
+	ictx.next_update = next_splice_step;
+	ictx.current_psbt = NULL;
+	ictx.desired_psbt = NULL;
+
+	char *error = process_interactivetx_updates(&ictx);
+
+	if(error) { // error is "Invalid tx sent."
+
+		peer_failed_err(peer->pps, &peer->channel_id,
+				"Interactive splicing error: %s", error);
+	}
+}
+
+static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
+{
+	const u8 *redeemscript;
+	struct interactivetx_context ictx;
+	u32 sequence = 0;
+	struct wally_psbt_input *in;
+	struct wally_psbt_output *out;
+
+	ictx.ctx = peer;
+	ictx.our_role = TX_INITIATOR;
+	ictx.pps = peer->pps;
+	ictx.channel_id = peer->channel_id;
+	ictx.tx_msg_count[0] = 0;
+	ictx.tx_msg_count[1] = 0;
+	ictx.tx_msg_count[2] = 0;
+	ictx.tx_msg_count[3] = 0;
+	assert(INTERACTIVETX_NUM_TX_MSGS == 4);
+	ictx.next_update = next_splice_step;
+	ictx.current_psbt = NULL;
+	ictx.desired_psbt = create_psbt(tmpctx, 0, 0, 0);
+
+	DLOG("We got the splice_ack messssaggggeee!!!");
+
+	/* We go first as the receiver of the ack.
+	 *
+	 * BOLT #2:
+	 *   The receiver of `splice_ack`:
+	 *    - MUST begin splice negotiation.
+	 */
+
+	assert(NUM_SIDES == 2);
+
+	redeemscript = bitcoin_redeem_2of2(tmpctx,
+					   &peer->channel->funding_pubkey[0],
+					   &peer->channel->funding_pubkey[1]);
+
+	/* First we spend the existing channel outpoint
+	 * 
+	 * Bolt #2
+	 *   The initiator:
+	 *     - MUST `tx_add_input` an input which spends the current funding
+	 *       transaction output.
+	 */
+	in = psbt_append_input(ictx.desired_psbt, &peer->channel->funding, sequence,
+			       NULL, redeemscript, NULL);
+
+	psbt_input_set_serial_id(tmpctx, in, 69420);
+
+	/* Segwit requires us to store the value of the outpoint being spent,
+	 * so let's do that */
+
+	u8 *scriptPubkey = scriptpubkey_p2wsh(ictx.desired_psbt, redeemscript);
+
+	DLOG("handle_peer_splice_ack.7.1");
+
+	psbt_input_set_wit_utxo(ictx.desired_psbt, 0,
+				scriptPubkey, peer->channel->funding_sats);
+
+	/* Next we add the new channel outpoint, with a 0 amount for now. It
+	 * will be filled in later.
+	 * 
+	 * Bolt #2
+	 *   The initiator:
+	 *     ...
+	 *     - MUST `tx_add_output` a zero-value output which pays to the two
+	 *       funding keys using the higher of the two `generation` fields.
+	 */
+	out = psbt_append_output(ictx.desired_psbt,
+				 redeemscript,
+				 amount_sat(0));
+
+	psbt_output_set_serial_id(tmpctx, out, 420420);
+
+	char *error = process_interactivetx_updates(&ictx);
+
+	if(error) {
+
+		peer_failed_err(peer->pps, &peer->channel_id,
+				"Interactive splicing error: %s", error);
+	}
+}
+
+static void handle_splice_stfu_success(struct peer *peer)
+{
+	u8 *msg;
+
+	msg = towire_channeld_splice_confirmed_init(NULL);
+	wire_sync_write(MASTER_FD, take(msg));
+
+	msg = towire_splice(NULL, &peer->channel_id);
+	peer_write(peer->pps, take(msg));
+}
+
+static void handle_splice_init(struct peer *peer, const u8 *inmsg)
+{
+	if(peer->on_stfu_success)
+		peer_failed_err(peer->pps, &peer->channel_id,
+				"Can't start a splice request"
+				"with a pending 'stfu' on the"
+				"channel.");
+
+	peer->on_stfu_success = handle_splice_stfu_success;
+
+	/* First things first we must STFU the channel */
+	peer->stfu = true;
+	peer->stfu_initiator = LOCAL;
+	maybe_send_stfu(peer);
+}
+
 static void peer_in(struct peer *peer, const u8 *msg)
 {
 	enum peer_wire type = fromwire_peektype(msg);
@@ -2265,6 +2434,12 @@ static void peer_in(struct peer *peer, const u8 *msg)
 #if EXPERIMENTAL_FEATURES
 	case WIRE_STFU:
 		handle_stfu(peer, msg);
+		return;
+	case WIRE_SPLICE:
+		handle_peer_splice(peer, msg);
+		return;
+	case WIRE_SPLICE_ACK:
+		handle_peer_splice_ack(peer, msg);
 		return;
 #endif
 	case WIRE_INIT:
@@ -3678,6 +3853,10 @@ static void req_in(struct peer *peer, const u8 *msg)
 	enum channeld_wire t = fromwire_peektype(msg);
 
 	switch (t) {
+	case WIRE_CHANNELD_SPLICE_INIT:
+	case WIRE_CHANNELD_SPLICE_CONFIRMED_INIT:
+		handle_splice_init(peer, msg);
+		return;
 	case WIRE_CHANNELD_FUNDING_DEPTH:
 		handle_funding_depth(peer, msg);
 		return;

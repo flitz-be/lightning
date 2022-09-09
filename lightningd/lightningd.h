@@ -200,6 +200,9 @@ struct lightningd {
 	/* Outstanding disconnect commands. */
 	struct list_head disconnect_commands;
 
+	/* Outstanding splice commands. */
+	struct list_head splice_commands;
+
 	/* Maintained by invoices.c */
 	struct invoices *invoices;
 
