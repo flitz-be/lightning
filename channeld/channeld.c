@@ -1897,7 +1897,7 @@ static void send_revocation(struct peer *peer,
 			    const struct htlc **changed_htlcs,
 			    const struct bitcoin_tx *committx,
 			    const struct secret *old_secret,
-			    const struct pubkey *next_point)
+			    const struct pubkey *next_point,
 			    struct tlv_commitment_signed_tlvs *cs_tlv)
 {
 	struct changed_htlc *changed;
@@ -5435,6 +5435,7 @@ static void req_in(struct peer *peer, const u8 *msg)
 	case WIRE_CHANNELD_SPLICE_SIGNED:
 		handle_splice_signed(peer, msg);
 		return;
+	case WIRE_CHANNELD_INFLIGHT_MINDEPTH:
 	case WIRE_CHANNELD_SPLICE_CONFIRMED_INIT:
 	case WIRE_CHANNELD_SPLICE_CONFIRMED_SIGNED:
 	case WIRE_CHANNELD_SPLICE_CONFIRMED_UPDATE:
