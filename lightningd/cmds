@@ -29,19 +29,20 @@ source contrib/startup_regtest.sh
 start_ln
 sleep 2
 fund_nodes
-PEER_ID=`l1-cli listpeers | jq -r .peers[0].id`
+sleep 10
+PEER_ID=$(l1-cli listpeers | jq -r ".peers[0].id")
 
-INVOICE=`l2-cli invoice 10000 testpre testpre | jq -r .bolt11`
+INVOICE=$(l2-cli invoice 10000 testpre testpre | jq -r ".bolt11")
 l1-cli pay $INVOICE
 
-PSBT=`l1-cli splice_init $PEER_ID | jq -r .psbt`
-PSBT_FUNDS=`l1-cli fundpsbt 100000sat slow 166 | jq -r .psbt`
-PSBT=`bt-cli joinpsbts "[\"$PSBT\", \"$PSBT_FUNDS\"]"`
-PSBT=`l1-cli splice_update $PEER_ID $PSBT | jq -r .psbt`
-PSBT=`l1-cli splice_finalize $PEER_ID | jq -r .psbt`
-PSBT=`l1-cli signpsbt -k psbt="$PSBT" | jq -r .signed_psbt`
+PSBT=$(l1-cli splice_init $PEER_ID | jq -r ".psbt")
+PSBT_FUNDS=$(l1-cli fundpsbt 100000sat slow 166 | jq -r ".psbt")
+PSBT=$(bt-cli joinpsbts "[\"$PSBT\", \"$PSBT_FUNDS\"]")
+PSBT=$(l1-cli splice_update $PEER_ID $PSBT | jq -r ".psbt")
+PSBT=$(l1-cli splice_finalize $PEER_ID | jq -r ".psbt")
+PSBT=$(l1-cli signpsbt -k psbt="$PSBT" | jq -r ".signed_psbt")
 l1-cli splice_signed $PEER_ID $PSBT
-# TX=`l1-cli splice_signed $PEER_ID $PSBT | jq -r .tx`
+# TX=$(l1-cli splice_signed $PEER_ID $PSBT | jq -r ".tx")
 
 
 
