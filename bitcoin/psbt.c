@@ -112,8 +112,9 @@ bool psbt_is_finalized(const struct wally_psbt *psbt)
 }
 
 struct wally_psbt_input *psbt_add_input(struct wally_psbt *psbt,
-					struct wally_tx_input *input,
-				       	size_t insert_at)
+					const struct wally_tx_input *input,
+				       	size_t insert_at/*,
+				       	const struct wally_tx_output *witness_utxo*/)
 {
 	const u32 flags = WALLY_PSBT_FLAG_NON_FINAL; /* Skip script/witness */
 	int wally_err;
@@ -121,6 +122,14 @@ struct wally_psbt_input *psbt_add_input(struct wally_psbt *psbt,
 	tal_wally_start();
 	wally_err = wally_psbt_add_input_at(psbt, insert_at, flags, input);
 	assert(wally_err == WALLY_OK);
+
+	// if(witness_utxo) {
+
+	// 	wally_err = wally_psbt_input_set_witness_utxo(&psbt->inputs[insert_at],
+	// 						      witness_utxo);
+	// 	assert(wally_err == WALLY_OK);
+	// }
+
 	tal_wally_end(psbt);
 	return &psbt->inputs[insert_at];
 }

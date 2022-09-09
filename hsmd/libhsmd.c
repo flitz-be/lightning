@@ -14,6 +14,9 @@
 #include <secp256k1_schnorrsig.h>
 #include <sodium/utils.h>
 #include <wally_psbt.h>
+#include <stdio.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 #if DEVELOPER
 /* If they specify --dev-force-privkey it ends up in here. */
@@ -464,6 +467,16 @@ static void hsm_key_for_utxo(struct privkey *privkey, struct pubkey *pubkey,
 	}
 }
 
+static void DLOG(const char *str)
+{
+	int fd = open("/tmp/dustin.txt", O_CREAT|O_RDWR|O_APPEND);
+
+	write(fd, str, strlen(str));
+	write(fd, "\n", 1);
+
+	close(fd);
+}
+
 /* Find our inputs by the pubkey associated with the inputs, and
  * add a partial sig for each */
 static void sign_our_inputs(struct utxo **utxos, struct wally_psbt *psbt)
@@ -502,7 +515,16 @@ static void sign_our_inputs(struct utxo **utxos, struct wally_psbt *psbt)
 							scriptpubkey_p2wsh(psbt, wscript),
 							utxo->amount);
 			}
+
+			struct bitcoin_tx *final_tx = bitcoin_tx_with_psbt(NULL, psbt);
+
+			u8* ptr = linearize_tx(NULL, final_tx);
+
+			DLOG("libhsdm tx hex before signing:");
+			DLOG(tal_hex(NULL, ptr));
+
 			tal_wally_start();
+
 			if (wally_psbt_sign(psbt, privkey.secret.data,
 					    sizeof(privkey.secret.data),
 					    EC_FLAG_GRIND_R) != WALLY_OK) {
@@ -516,6 +538,35 @@ static void sign_our_inputs(struct utxo **utxos, struct wally_psbt *psbt)
 						   psbt));
 			}
 			tal_wally_end(psbt);
+
+			struct wally_psbt_input *in = &psbt->inputs[j];
+
+			for(int k = 0; k < in->signatures.num_items; k++) {
+
+				int ret;
+
+				struct wally_map_item *item = &in->signatures.items[k];
+				secp256k1_ecdsa_signature sig;
+
+				assert(sizeof(sig) == EC_SIGNATURE_LEN);
+
+				if ((ret = wally_ec_sig_from_der(item->value,
+								 item->value_len,
+								 (u8*)&sig,
+								 sizeof(sig))) != WALLY_OK)
+					return hsmd_status_broken("wally_ec_sig_from_der fails %d",
+								  ret);
+
+				secp256k1_ecdsa_signature_normalize(secp256k1_ctx, &sig, &sig);
+
+				if ((ret = wally_ec_sig_to_der((u8*)&sig,
+							       sizeof(sig),
+							       item->value,
+				                               item->value_len,
+				                               &item->value_len)) != WALLY_OK)
+					return hsmd_status_broken("wally_der_to_ec_sig fails %d",
+								  ret);
+			}
 		}
 	}
 }
@@ -1091,6 +1142,7 @@ static u8 *handle_sign_mutual_close_tx(struct hsmd_client *c, const u8 *msg_in)
 }
 
 /* This is used by channeld to sign the final splice tx. */
+//TODO: Merge this into the close_tx
 static u8 *handle_sign_splice_tx(struct hsmd_client *c, const u8 *msg_in)
 {
 	struct secret channel_seed;
@@ -1098,11 +1150,13 @@ static u8 *handle_sign_splice_tx(struct hsmd_client *c, const u8 *msg_in)
 	struct pubkey remote_funding_pubkey, local_funding_pubkey;
 	struct bitcoin_signature sig;
 	struct secrets secrets;
+	unsigned int input_index;
 	const u8 *funding_wscript;
 
 	if (!fromwire_hsmd_sign_splice_tx(tmpctx, msg_in,
 					  &tx,
-					  &remote_funding_pubkey))
+					  &remote_funding_pubkey,
+					  &input_index))
 		return hsmd_status_malformed_request(c, msg_in);
 
 	tx->chainparams = c->chainparams;
@@ -1116,7 +1170,8 @@ static u8 *handle_sign_splice_tx(struct hsmd_client *c, const u8 *msg_in)
 	funding_wscript = bitcoin_redeem_2of2(tmpctx,
 					      &local_funding_pubkey,
 					      &remote_funding_pubkey);
-	sign_tx_input(tx, 0, NULL, funding_wscript,
+
+	sign_tx_input(tx, input_index, NULL, funding_wscript,
 		      &secrets.funding_privkey,
 		      &local_funding_pubkey,
 		      SIGHASH_ALL, &sig);

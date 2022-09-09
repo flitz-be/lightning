@@ -57,7 +57,11 @@ static int compare_outputs_at(const struct output_set *a,
 			       &b->output.unknowns);
 }
 
-static const u8 *linearize_input(const tal_t *ctx,
+const u8 *linearize_input(const tal_t *ctx,
+				 const struct wally_psbt_input *in,
+				 const struct wally_tx_input *tx_in);
+
+const u8 *linearize_input(const tal_t *ctx,
 				 const struct wally_psbt_input *in,
 				 const struct wally_tx_input *tx_in)
 {
@@ -275,10 +279,11 @@ struct psbt_changeset *psbt_get_changeset(const tal_t *ctx,
 			continue;
 		}
 
-		if (!input_identical(orig, i, new, j)) {
-			ADD(input, set->rm_ins, orig, i);
-			ADD(input, set->added_ins, new, j);
-		}
+		(void)input_identical;
+		// if (!input_identical(orig, i, new, j)) {
+		// 	ADD(input, set->rm_ins, orig, i);
+		// 	ADD(input, set->added_ins, new, j);
+		// }
 		i++;
 		j++;
 	}
@@ -309,10 +314,11 @@ struct psbt_changeset *psbt_get_changeset(const tal_t *ctx,
 			j++;
 			continue;
 		}
-		if (!output_identical(orig, i, new, j)) {
-			ADD(output, set->rm_outs, orig, i);
-			ADD(output, set->added_outs, new, j);
-		}
+		(void)output_identical;
+		// if (!output_identical(orig, i, new, j)) {
+		// 	ADD(output, set->rm_outs, orig, i);
+		// 	ADD(output, set->added_outs, new, j);
+		// }
 		i++;
 		j++;
 	}
@@ -325,7 +331,7 @@ void psbt_input_set_serial_id(const tal_t *ctx,
 			      struct wally_psbt_input *input,
 			      u64 serial_id)
 {
-	u8 *key = psbt_make_key(tmpctx, PSBT_TYPE_SERIAL_ID, NULL);
+	u8 *key = psbt_make_key(ctx, PSBT_TYPE_SERIAL_ID, NULL);
 	beint64_t bev = cpu_to_be64(serial_id);
 
 	psbt_input_set_unknown(ctx, input, key, &bev, sizeof(bev));
@@ -336,7 +342,7 @@ void psbt_output_set_serial_id(const tal_t *ctx,
 			       struct wally_psbt_output *output,
 			       u64 serial_id)
 {
-	u8 *key = psbt_make_key(tmpctx, PSBT_TYPE_SERIAL_ID, NULL);
+	u8 *key = psbt_make_key(ctx, PSBT_TYPE_SERIAL_ID, NULL);
 	beint64_t bev = cpu_to_be64(serial_id);
 	psbt_output_set_unknown(ctx, output, key, &bev, sizeof(bev));
 }
@@ -452,7 +458,7 @@ void psbt_add_serials(struct wally_psbt *psbt, enum tx_role role)
 			continue;
 
 		serial_id = psbt_new_input_serial(psbt, role);
-		psbt_input_set_serial_id(psbt, &psbt->inputs[i], serial_id);
+		psbt_input_set_serial_id(NULL, &psbt->inputs[i], serial_id);
 	}
 	for (size_t i = 0; i < psbt->num_outputs; i++) {
 		/* Skip ones that already have a serial id */
@@ -460,7 +466,7 @@ void psbt_add_serials(struct wally_psbt *psbt, enum tx_role role)
 			continue;
 
 		serial_id = psbt_new_output_serial(psbt, role);
-		psbt_output_set_serial_id(psbt, &psbt->outputs[i], serial_id);
+		psbt_output_set_serial_id(NULL, &psbt->outputs[i], serial_id);
 	}
 }
 

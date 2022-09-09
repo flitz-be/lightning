@@ -187,10 +187,43 @@ msgtype,channeld_got_revoke_reply,1122
 msgtype,channeld_splice_init,7204
 
 # channeld->master: hello, I started a channel splice open
-msgtype,channeld_splice_confirmed_init,7206
+msgtype,channeld_splice_confirmed_init,7205
+msgdata,channeld_splice_confirmed_init,psbt,wally_psbt,
+
+# master->channeld: Update an active splice
+msgtype,channeld_splice_update,7206
+msgdata,channeld_splice_update,psbt,wally_psbt,
+
+# channeld->master: Splice update complete
+msgtype,channeld_splice_confirmed_update,7207
+msgdata,channeld_splice_confirmed_update,psbt,wally_psbt,
+msgdata,channeld_splice_confirmed_update,commitments_secured,bool,
+
+# channeld->master: Lookup a transaction
+msgtype,channeld_splice_lookup_tx,7208
+msgdata,channeld_splice_lookup_tx,txid,bitcoin_txid,
+
+# master->channeld: Retrieved transaction
+msgtype,channeld_splice_lookup_tx_result,7209
+msgdata,channeld_splice_lookup_tx_result,tx,bitcoin_tx,
+
+# master->channeld: User is ready to finalize the psbt
+msgtype,channeld_splice_finalize,7210
+
+# channeld->master: Splice is finalized
+msgtype,channeld_splice_confirmed_finalize,7211
+msgdata,channeld_splice_confirmed_finalize,psbt,wally_psbt,
+
+# master->channeld: User has signed psbt and it's ready to complete
+msgtype,channeld_splice_signed,7212
+msgdata,channeld_splice_signed,psbt,wally_psbt,
+
+# channeld->master: Signed psbt is completed
+msgtype,channeld_splice_confirmed_signed,7213
+msgdata,channeld_splice_confirmed_signed,tx,bitcoin_tx,
 
 # channeld->master: Add an inflight to the DB
-msgtype,channeld_add_inflight,7208
+msgtype,channeld_add_inflight,7214
 msgdata,channeld_add_inflight,tx_id,bitcoin_txid,
 msgdata,channeld_add_inflight,tx_outnum,u32,
 msgdata,channeld_add_inflight,feerate,u32,
@@ -199,11 +232,11 @@ msgdata,channeld_add_inflight,our_funding_satoshis,amount_sat,
 msgdata,channeld_add_inflight,psbt,wally_psbt,
 
 # channeld->master: Give me inflight index #n
-msgtype,channeld_get_inflight,7210
+msgtype,channeld_get_inflight,7215
 msgdata,channeld_get_inflight,index,u32,
 
 # master->channeld:Here is inflight index #n. NULL on last / index not found
-msgtype,channeld_got_inflight,7211
+msgtype,channeld_got_inflight,7216
 msgdata,channeld_got_inflight,is_found,bool,
 msgdata,channeld_got_inflight,tx_id,bitcoin_txid,
 msgdata,channeld_got_inflight,tx_outnum,u32,

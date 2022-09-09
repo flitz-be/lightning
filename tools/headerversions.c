@@ -32,7 +32,7 @@ static const char template[] =
 	"	char compiled_gmp_version[100];\n"
 	IF_SQLITE3(
 	"       /* Require at least the version we compiled with. */"
-	"	if (SQLITE_VERSION_NUMBER > sqlite3_libversion_number())\n"
+	"	if (false && SQLITE_VERSION_NUMBER > sqlite3_libversion_number())\n"
 	"		errx(1, \"SQLITE version mismatch: compiled %%u, now %%u\",\n"
 	"		     SQLITE_VERSION_NUMBER, sqlite3_libversion_number());\n"
 	"       /* Ensure the major version matches. */"
