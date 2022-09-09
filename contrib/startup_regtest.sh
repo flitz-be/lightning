@@ -296,9 +296,6 @@ splice() {
 	echo "Transactions in mempool:"
 
 	$btcli getrawmempool
-
-	# echo "Sending splice TX to chain"
-	# $btcli sendrawtransaction $TX
 }
 
 stop_nodes() {

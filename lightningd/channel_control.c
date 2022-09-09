@@ -1135,6 +1135,8 @@ bool peer_start_channeld(struct channel *channel,
 	struct secret last_remote_per_commit_secret;
 	secp256k1_ecdsa_signature *remote_ann_node_sig, *remote_ann_bitcoin_sig;
 	struct penalty_base *pbases;
+	u32 inflight_count;
+	struct channel_inflight *inflight;
 
 	hsmfd = hsm_get_client_fd(ld, &channel->peer->id,
 				  channel->dbid,
@@ -1232,6 +1234,9 @@ bool peer_start_channeld(struct channel *channel,
 				       "Could not derive final_ext_key %"PRIu64,
 				       channel->final_key_idx);
 		return false;
+
+	list_for_each(&channel->inflights, inflight, list) {
+		inflight_count++;
 	}
 
 	initmsg = towire_channeld_init(tmpctx,
@@ -1304,7 +1309,8 @@ bool peer_start_channeld(struct channel *channel,
 					     NULL),
 				       pbases,
 				       reestablish_only,
-				       channel->channel_update);
+				       channel->channel_update,
+				       inflight_count);
 
 	/* We don't expect a response: we are triggered by funding_depth_cb. */
 	subd_send_msg(channel->owner, take(initmsg));
@@ -1700,7 +1706,7 @@ static struct command_result *json_splice_init(struct command *cmd,
 		return command_fail(cmd, FUNDING_UNKNOWN_PEER, "Unknown peer");
 	}
 
-	//TODO: Make this work with multiple channels per peer
+	//DTODO: Make this work with multiple channels per peer
 
 	channel = peer_any_active_channel(peer, NULL);
 	if (!channel) {

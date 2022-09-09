@@ -408,6 +408,18 @@ struct channel *peer_any_active_channel(struct peer *peer, bool *others);
 /* Find a channel which is not yet saved to disk */
 struct channel *peer_any_unsaved_channel(struct peer *peer, bool *others);
 
+/* Find a channel which is in state CHANNELD_NORMAL or CHANNELD_AWAITING_SPLICE, if any */
+struct channel *peer_normal_channel(struct peer *peer);
+
+/* Get active channel for peer, optionally any uncommitted_channel. */
+struct channel *active_channel_by_id(struct lightningd *ld,
+				     const struct node_id *id,
+				     struct uncommitted_channel **uc);
+
+/* Get unsaved channel for peer */
+struct channel *unsaved_channel_by_id(struct lightningd *ld,
+				      const struct node_id *id);
+
 struct channel *channel_by_dbid(struct lightningd *ld, const u64 dbid);
 
 /* Includes both real scids and aliases.  If !privacy_leak_ok, then private

@@ -15,9 +15,9 @@
 #include <gossipd/gossipd_wiregen.h>
 #include <gossipd/routing.h>
 
-#ifndef SUPERVERBOSE
-#define SUPERVERBOSE(...)
-#endif
+static bool print_superverbose = true;
+#define SUPERVERBOSE(...)					\
+	do { if (print_superverbose) status_debug(__VA_ARGS__); } while(0)
 
 /* 365.25 * 24 * 60 / 10 */
 #define BLOCKS_PER_YEAR 52596
@@ -51,6 +51,7 @@ struct dying_channel {
 static u8 update_tokens(const struct routing_state *rstate,
 			u8 tokens, u32 prev_timestamp, u32 new_timestamp)
 {
+	status_debug("update_tokens");
 	u64 num_tokens = tokens;
 
 	assert(new_timestamp >= prev_timestamp);
@@ -65,6 +66,7 @@ static u8 update_tokens(const struct routing_state *rstate,
 static bool ratelimit(const struct routing_state *rstate,
 		      u8 *tokens, u32 prev_timestamp, u32 new_timestamp)
 {
+	status_debug("ratelimit");
 	*tokens = update_tokens(rstate, *tokens, prev_timestamp, new_timestamp);
 
 	/* Now, if we can afford it, pass this message. */
@@ -114,17 +116,21 @@ static struct unupdated_channel *
 get_unupdated_channel(const struct routing_state *rstate,
 		      const struct short_channel_id *scid)
 {
+	status_debug("get_unupdated_channel");
 	return uintmap_get(&rstate->unupdated_chanmap, scid->u64);
 }
 
 static void destroy_unupdated_channel(struct unupdated_channel *uc,
 				      struct routing_state *rstate)
 {
+	status_debug("destroy_unupdated_channel");
+	status_debug("uintmap_del: %llu", uc->scid.u64);
 	uintmap_del(&rstate->unupdated_chanmap, uc->scid.u64);
 }
 
 static struct node_map *new_node_map(const tal_t *ctx)
 {
+	status_debug("new_node_map");
 	struct node_map *map = tal(ctx, struct node_map);
 	node_map_init(map);
 	tal_add_destructor(map, node_map_clear);
@@ -142,6 +148,7 @@ static bool node_uses_chan_map(const struct node *node)
 /* When simple array fills, use a htable. */
 static void convert_node_to_chan_map(struct node *node)
 {
+	status_debug("convert_node_to_chan_map");
 	struct chan *chans[NUM_IMMEDIATE_CHANS];
 
 	memcpy(chans, node->chans.arr, sizeof(chans));
@@ -153,6 +160,7 @@ static void convert_node_to_chan_map(struct node *node)
 
 static void add_chan(struct node *node, struct chan *chan)
 {
+	status_debug("add_chan");
 	if (!node_uses_chan_map(node)) {
 		for (size_t i = 0; i < NUM_IMMEDIATE_CHANS; i++) {
 			if (node->chans.arr[i] == NULL) {
@@ -169,6 +177,7 @@ static void add_chan(struct node *node, struct chan *chan)
 static struct chan *next_chan_arr(const struct node *node,
 				  struct chan_map_iter *i)
 {
+	status_debug("next_chan_arr");
 	while (i->i.off < NUM_IMMEDIATE_CHANS) {
 		if (node->chans.arr[i->i.off])
 			return node->chans.arr[i->i.off];
@@ -179,6 +188,7 @@ static struct chan *next_chan_arr(const struct node *node,
 
 struct chan *first_chan(const struct node *node, struct chan_map_iter *i)
 {
+	status_debug("first_chan");
 	if (!node_uses_chan_map(node)) {
 		i->i.off = 0;
 		return next_chan_arr(node, i);
@@ -189,6 +199,7 @@ struct chan *first_chan(const struct node *node, struct chan_map_iter *i)
 
 struct chan *next_chan(const struct node *node, struct chan_map_iter *i)
 {
+	status_debug("next_chan");
 	if (!node_uses_chan_map(node)) {
 		i->i.off++;
 		return next_chan_arr(node, i);
@@ -199,6 +210,7 @@ struct chan *next_chan(const struct node *node, struct chan_map_iter *i)
 
 static void destroy_routing_state(struct routing_state *rstate)
 {
+	status_debug("destroy_routing_state");
 	/* Since we omitted destructors on these, clean up manually */
 	u64 idx;
 	for (struct chan *chan = uintmap_first(&rstate->chanmap, &idx);
@@ -214,6 +226,7 @@ static void destroy_routing_state(struct routing_state *rstate)
  * our canned tests, and usually old gossip is better than no gossip */
 static bool timestamp_reasonable(struct routing_state *rstate, u32 timestamp)
 {
+	status_debug("timestamp_reasonable");
 	u64 now = gossip_time_now(rstate).ts.tv_sec;
 
 	/* More than one day ahead? */
@@ -229,6 +242,7 @@ static bool timestamp_reasonable(struct routing_state *rstate, u32 timestamp)
 static void memleak_help_routing_tables(struct htable *memtable,
 					struct routing_state *rstate)
 {
+	status_debug("memleak_help_routing_tables");
 	struct node *n;
 	struct node_map_iter nit;
 
@@ -249,6 +263,7 @@ static void memleak_help_routing_tables(struct htable *memtable,
 /* Once an hour, or at 10000 entries, we expire old ones */
 static void txout_failure_age(struct routing_state *rstate)
 {
+	status_debug("txout_failure_age");
 	uintmap_clear(&rstate->txout_failures_old);
 	rstate->txout_failures_old = rstate->txout_failures;
 	uintmap_init(&rstate->txout_failures);
@@ -262,6 +277,8 @@ static void txout_failure_age(struct routing_state *rstate)
 static void add_to_txout_failures(struct routing_state *rstate,
 				  const struct short_channel_id *scid)
 {
+	status_debug("add_to_txout_failures");
+	status_debug("rstate->txout_failures uintmap_add: %llu", scid->u64);
 	if (uintmap_add(&rstate->txout_failures, scid->u64, true)
 	    && ++rstate->num_txout_failures == 10000) {
 		tal_free(rstate->txout_failure_timer);
@@ -272,6 +289,7 @@ static void add_to_txout_failures(struct routing_state *rstate,
 static bool in_txout_failures(struct routing_state *rstate,
 			      const struct short_channel_id *scid)
 {
+	status_debug("in_txout_failures");
 	if (uintmap_get(&rstate->txout_failures, scid->u64))
 		return true;
 
@@ -291,6 +309,7 @@ struct routing_state *new_routing_state(const tal_t *ctx,
 					bool dev_fast_gossip,
 					bool dev_fast_gossip_prune)
 {
+	status_debug("new_routing_state");
 	struct routing_state *rstate = tal(ctx, struct routing_state);
 	rstate->nodes = new_node_map(rstate);
 	rstate->timers = timers;
@@ -349,6 +368,7 @@ bool node_map_node_eq(const struct node *n, const struct node_id *pc)
 
 static void destroy_node(struct node *node, struct routing_state *rstate)
 {
+	status_debug("destroy_node");
 	struct chan_map_iter i;
 	struct chan *c;
 	node_map_del(rstate->nodes, node);
@@ -371,6 +391,7 @@ struct node *get_node(struct routing_state *rstate,
 static struct node *new_node(struct routing_state *rstate,
 			     const struct node_id *id)
 {
+	status_debug("new_node");
 	struct node *n;
 
 	assert(!get_node(rstate, id));
@@ -395,9 +416,12 @@ static bool node_has_public_channels(struct node *node)
 	struct chan *c;
 
 	for (c = first_chan(node, &i); c; c = next_chan(node, &i)) {
-		if (is_chan_public(c))
+		if (is_chan_public(c)) {
+			status_debug("node_has_public_channels:true");
 			return true;
+		}
 	}
+	status_debug("node_has_public_channels:false");
 	return false;
 }
 
@@ -405,6 +429,7 @@ static bool node_has_public_channels(struct node *node)
  * we only send once we have a channel_update. */
 static bool node_has_broadcastable_channels(struct node *node)
 {
+	status_debug("node_has_broadcastable_channels");
 	struct chan_map_iter i;
 	struct chan *c;
 
@@ -420,6 +445,7 @@ static bool node_has_broadcastable_channels(struct node *node)
 
 static bool node_announce_predates_channels(const struct node *node)
 {
+	status_debug("node_announce_predates_channels");
 	struct chan_map_iter i;
 	struct chan *c;
 
@@ -438,6 +464,7 @@ static bool node_announce_predates_channels(const struct node *node)
 static void force_node_announce_rexmit(struct routing_state *rstate,
 				       struct node *node)
 {
+	status_debug("force_node_announce_rexmit");
 	const u8 *announce;
 	bool is_local = node_id_eq(&node->id, &rstate->local_id);
 	announce = gossip_store_get(tmpctx, rstate->gs, node->bcast.index);
@@ -471,6 +498,7 @@ static void force_node_announce_rexmit(struct routing_state *rstate,
 static void remove_chan_from_node(struct routing_state *rstate,
 				  struct node *node, const struct chan *chan)
 {
+	status_debug("remove_chan_from_node");
 	size_t num_chans;
 
 	if (!node_uses_chan_map(node)) {
@@ -533,6 +561,7 @@ static void destroy_chan_check(struct chan *chan)
 
 static void free_chans_from_node(struct routing_state *rstate, struct chan *chan)
 {
+	status_debug("free_chan");
 	remove_chan_from_node(rstate, chan->nodes[0], chan);
 	remove_chan_from_node(rstate, chan->nodes[1], chan);
 
@@ -555,6 +584,7 @@ static void init_half_chan(struct routing_state *rstate,
 				 struct chan *chan,
 				 int channel_idx)
 {
+	status_debug("init_half_chan");
 	struct half_chan *c = &chan->half[channel_idx];
 
 	broadcastable_init(&c->bcast);
@@ -566,6 +596,7 @@ static void bad_gossip_order(const u8 *msg,
 			     const struct peer *peer,
 			     const char *details)
 {
+	status_debug("bad_gossip_order");
 	status_peer_debug(peer ? &peer->id : NULL,
 			  "Bad gossip order: %s before announcement %s",
 			  peer_wire_name(fromwire_peektype(msg)),
@@ -578,6 +609,7 @@ struct chan *new_chan(struct routing_state *rstate,
 		      const struct node_id *id2,
 		      struct amount_sat satoshis)
 {
+	status_debug("new_chan");
 	struct chan *chan = tal(rstate, struct chan);
 	int n1idx = node_id_idx(id1, id2);
 	struct node *n1, *n2;
@@ -611,6 +643,7 @@ struct chan *new_chan(struct routing_state *rstate,
 	init_half_chan(rstate, chan, n1idx);
 	init_half_chan(rstate, chan, !n1idx);
 
+	status_debug("rstate->chanmap uintmap_add: %llu", scid->u64);
 	uintmap_add(&rstate->chanmap, scid->u64, chan);
 
 	return chan;
@@ -621,6 +654,7 @@ static bool check_signed_hash_nodeid(const struct sha256_double *hash,
 				     const secp256k1_ecdsa_signature *signature,
 				     const struct node_id *id)
 {
+	status_debug("check_signed_hash_nodeid");
 	struct pubkey key;
 
 	return pubkey_from_node_id(&key, id)
@@ -633,6 +667,7 @@ static u8 *check_channel_update(const tal_t *ctx,
 				const secp256k1_ecdsa_signature *node_sig,
 				const u8 *update)
 {
+	status_debug("check_channel_update");
 	/* 2 byte msg type + 64 byte signatures */
 	int offset = 66;
 	struct sha256_double hash;
@@ -660,6 +695,7 @@ static u8 *check_channel_announcement(const tal_t *ctx,
 	const secp256k1_ecdsa_signature *bitcoin1_sig,
 	const secp256k1_ecdsa_signature *bitcoin2_sig, const u8 *announcement)
 {
+	status_debug("check_channel_announcement");
 	/* 2 byte msg type + 256 byte signatures */
 	int offset = 258;
 	struct sha256_double hash;
@@ -726,6 +762,7 @@ static u8 *check_channel_announcement(const tal_t *ctx,
 static void del_pending_node_announcement(const tal_t *ctx UNUSED,
 					  struct pending_node_announce *pna)
 {
+	status_debug("del_pending_node_announcement");
 	if (--pna->refcount == 0) {
 		pending_node_map_del(pna->rstate->pending_node_map, pna);
 		tal_free(pna);
@@ -736,6 +773,7 @@ static void catch_node_announcement(const tal_t *ctx,
 				    struct routing_state *rstate,
 				    struct node_id *nodeid)
 {
+	status_debug("catch_node_announcement");
 	struct pending_node_announce *pna;
 	struct node *node;
 
@@ -767,6 +805,7 @@ static void catch_node_announcement(const tal_t *ctx,
 static void process_pending_node_announcement(struct routing_state *rstate,
 					      struct node_id *nodeid)
 {
+	status_debug("process_pending_node_announcement");
 	struct pending_node_announce *pna = pending_node_map_get(rstate->pending_node_map, nodeid);
 	if (!pna)
 		return;
@@ -799,6 +838,7 @@ static struct pending_cannouncement *
 find_pending_cannouncement(struct routing_state *rstate,
 			   const struct short_channel_id *scid)
 {
+	status_debug("find_pending_cannouncement");
 	struct pending_cannouncement *pann;
 
 	pann = pending_cannouncement_map_get(&rstate->pending_cannouncements, scid);
@@ -809,6 +849,7 @@ find_pending_cannouncement(struct routing_state *rstate,
 static void destroy_pending_cannouncement(struct pending_cannouncement *pending,
 					  struct routing_state *rstate)
 {
+	status_debug("destroy_pending_cannouncement");
 	pending_cannouncement_map_del(&rstate->pending_cannouncements, pending);
 }
 
@@ -818,6 +859,7 @@ static void add_channel_announce_to_broadcast(struct routing_state *rstate,
 					      u32 timestamp,
 					      u32 index)
 {
+	status_debug("add_channel_announce_to_broadcast");
 	u8 *addendum = towire_gossip_store_channel_amount(tmpctx, chan->sat);
 	bool is_local = local_direction(rstate, chan, NULL);
 
@@ -879,6 +921,7 @@ bool routing_add_channel_announcement(struct routing_state *rstate,
 				      u32 index,
 				      struct peer *peer)
 {
+	status_debug("routing_add_channel_announcement");
 	struct chan *oldchan;
 	secp256k1_ecdsa_signature node_signature_1, node_signature_2;
 	secp256k1_ecdsa_signature bitcoin_signature_1, bitcoin_signature_2;
@@ -945,6 +988,7 @@ bool routing_add_channel_announcement(struct routing_state *rstate,
 	uc->id[0] = node_id_1;
 	uc->id[1] = node_id_2;
 	set_softref(uc, &uc->peer_softref, peer);
+	status_debug("rstate->unupdated_chanmap uintmap_add: %llu", scid.u64);
 	uintmap_add(&rstate->unupdated_chanmap, scid.u64, uc);
 	tal_add_destructor2(uc, destroy_unupdated_channel, rstate);
 
@@ -978,6 +1022,7 @@ u8 *handle_channel_announcement(struct routing_state *rstate,
 				const struct short_channel_id **scid,
 				struct peer *peer)
 {
+	status_debug("handle_channel_announcement");
 	struct pending_cannouncement *pending;
 	struct bitcoin_blkid chain_hash;
 	u8 *features, *warn;
@@ -1133,6 +1178,8 @@ u8 *handle_channel_announcement(struct routing_state *rstate,
 	catch_node_announcement(pending, rstate, &pending->node_id_1);
 	catch_node_announcement(pending, rstate, &pending->node_id_2);
 
+	//TODO: Investigate: Is the node_id_1/2 a key that cant be duplicated and messing things up?
+
 	pending_cannouncement_map_add(&rstate->pending_cannouncements, pending);
 	tal_add_destructor2(pending, destroy_pending_cannouncement, rstate);
 
@@ -1159,6 +1206,7 @@ static void process_pending_channel_update(struct daemon *daemon,
 					   const u8 *cupdate,
 					   struct peer *peer)
 {
+	status_debug("process_pending_channel_update");
 	u8 *err;
 
 	if (!cupdate)
@@ -1182,6 +1230,7 @@ bool handle_pending_cannouncement(struct daemon *daemon,
 				  struct amount_sat sat,
 				  const u8 *outscript)
 {
+	status_debug("handle_pending_cannouncement");
 	const u8 *s;
 	struct pending_cannouncement *pending;
 	const struct node_id *src;
@@ -1263,6 +1312,7 @@ static void update_pending(struct pending_cannouncement *pending,
 			   const u8 direction,
 			   struct peer *peer)
 {
+	status_debug("update_pending");
 	SUPERVERBOSE("Deferring update for pending channel %s/%d",
 		     type_to_string(tmpctx, struct short_channel_id,
 				    &pending->short_channel_id), direction);
@@ -1289,6 +1339,7 @@ bool routing_add_channel_update(struct routing_state *rstate,
 				bool ignore_timestamp,
 				bool force_spam_flag)
 {
+	status_debug("routing_add_channel_update");
 	secp256k1_ecdsa_signature signature;
 	struct short_channel_id short_channel_id;
 	u32 timestamp;
@@ -1516,6 +1567,7 @@ bool would_ratelimit_cupdate(struct routing_state *rstate,
 			     const struct half_chan *hc,
 			     u32 timestamp)
 {
+	status_debug("would_ratelimit_cupdate");
 	return update_tokens(rstate, hc->tokens, hc->bcast.timestamp, timestamp)
 		>= TOKENS_PER_MSG;
 }
@@ -1524,6 +1576,7 @@ static const struct node_id *get_channel_owner(struct routing_state *rstate,
 					       const struct short_channel_id *scid,
 					       int direction)
 {
+	status_debug("get_channel_owner");
 	struct chan *chan = get_channel(rstate, scid);
 	struct unupdated_channel *uc;
 
@@ -1542,6 +1595,7 @@ u8 *handle_channel_update(struct routing_state *rstate, const u8 *update TAKES,
 			  struct short_channel_id *unknown_scid,
 			  bool force)
 {
+	status_debug("handle_channel_update");
 	u8 *serialized;
 	const struct node_id *owner;
 	secp256k1_ecdsa_signature signature;
@@ -1646,6 +1700,7 @@ bool routing_add_node_announcement(struct routing_state *rstate,
 				   bool *was_unknown,
 				   bool force_spam_flag)
 {
+	status_debug("routing_add_node_announcement");
 	struct node *node;
 	secp256k1_ecdsa_signature signature;
 	u32 timestamp;
@@ -1821,6 +1876,7 @@ bool routing_add_node_announcement(struct routing_state *rstate,
 u8 *handle_node_announcement(struct routing_state *rstate, const u8 *node_ann,
 			     struct peer *peer, bool *was_unknown)
 {
+	status_debug("handle_node_announcement");
 	u8 *serialized;
 	struct sha256_double hash;
 	secp256k1_ecdsa_signature signature;
@@ -1904,6 +1960,7 @@ u8 *handle_node_announcement(struct routing_state *rstate, const u8 *node_ann,
 
 void route_prune(struct routing_state *rstate)
 {
+	status_debug("route_prune");
 	u64 now = gossip_time_now(rstate).ts.tv_sec;
 	/* Anything below this highwater mark ought to be pruned */
 	const s64 highwater = now - GOSSIP_PRUNE_INTERVAL(rstate->dev_fast_gossip_prune);
@@ -1948,6 +2005,7 @@ void route_prune(struct routing_state *rstate)
 	     uc;
 	     uc = uintmap_after(&rstate->unupdated_chanmap, &idx)) {
 		if (uc->added.ts.tv_sec < highwater) {
+			status_debug("tal_free unupdated_chanmap: %llud", idx);
 			tal_free(uc);
 		}
 	}
@@ -1964,6 +2022,7 @@ bool routing_add_private_channel(struct routing_state *rstate,
 				 struct amount_sat capacity,
 				 const u8 *chan_ann, u64 index)
 {
+	status_debug("routing_add_private_channel");
 	struct short_channel_id scid;
 	struct node_id node_id[2];
 	struct pubkey ignorekey;
@@ -2041,6 +2100,7 @@ struct timeabs gossip_time_now(const struct routing_state *rstate)
 
 const char *unfinalized_entries(const tal_t *ctx, struct routing_state *rstate)
 {
+	status_debug("routing_add_private_channel");
 	struct unupdated_channel *uc;
 	u64 index;
 	struct pending_node_announce *pna;
@@ -2062,6 +2122,7 @@ const char *unfinalized_entries(const tal_t *ctx, struct routing_state *rstate)
 /* Gossip store was corrupt, forget anything we loaded. */
 void remove_all_gossip(struct routing_state *rstate)
 {
+	status_debug("remove_all_gossip");
 	struct node *n;
 	struct node_map_iter nit;
 	struct chan *c;
@@ -2083,6 +2144,7 @@ void remove_all_gossip(struct routing_state *rstate)
 
 	/* Now free all the channels. */
 	while ((c = uintmap_first(&rstate->chanmap, &index)) != NULL) {
+		status_debug("uintmap_del: %llu", index);
 		uintmap_del(&rstate->chanmap, index);
 #if DEVELOPER
 		c->sat = amount_sat((unsigned long)c);

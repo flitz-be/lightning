@@ -1,0 +1,27 @@
+Tasks:
+
+* Make commit_sigs work during AWAITING_SPLICE
+** Make sure splice HTLC*commit sigs are being made
+** Make sure splice HTLC*commit sigs are being verified
+** MAke sure splice HTLC*commit sigs are being stored in DB
+* Make commit_sigs work after splice confirms
+* 
+* Add back all commented out verification steps
+* 
+* Change all TODOs in my code to DTODOs
+* Add helpful log messages in places to be able to see what's going on
+* Figure out why we can't pay invoices after splice_init
+* Change splice to use channel_id instead of peer_id
+* Rename channeld *_splice_* functiosn to have more intuitive names
+* Figure if we should remove the splice_finalized RPC call and remove it if so
+* Look through channel_control RPC commands and clean thing sup
+* Audit the help messages channel_control RPC commands and clean them up
+* Ensure splice is added to the docs and added it if needed
+* Move wire updates to experiemental patches
+* Figure out if all the splicing code should go in #if EXPERIMENTAL
+** And then put them there if needed
+
+
+
+Completed:
+
