@@ -397,6 +397,8 @@ static void maybe_send_stfu(struct peer *peer)
  * it's a private channel) */
 static void send_channel_update(struct peer *peer, int disable_flag)
 {
+	status_debug("send_channel_update %d", disable_flag);
+
 	u8 *msg;
 
 	assert(disable_flag == 0 || disable_flag == ROUTING_FLAGS_DISABLED);
@@ -468,6 +470,8 @@ static void send_announcement_signatures(struct peer *peer)
 	status_debug("Exchanging announcement signatures.");
 	ca = create_channel_announcement(tmpctx, peer);
 	req = towire_hsmd_cannouncement_sig_req(tmpctx, ca);
+
+	DLOG(tal_hex(tmpctx, ca));
 
 	msg = hsm_req(tmpctx, req);
 	if (!fromwire_hsmd_cannouncement_sig_reply(msg,
@@ -563,11 +567,14 @@ static void announce_channel(struct peer *peer)
 {
 	u8 *cannounce;
 
+	send_channel_update(peer, 0);
+
 	cannounce = create_channel_announcement(tmpctx, peer);
 
 	wire_sync_write(MASTER_FD,
 			take(towire_channeld_local_channel_announcement(NULL,
 									cannounce)));
+
 	send_channel_update(peer, 0);
 }
 
@@ -678,8 +685,16 @@ static void handle_peer_splice_locked(struct peer *peer, const u8 *msg)
 			take(towire_channeld_got_splice_locked(NULL,
 						&peer->remote_per_commit)));
 
+	peer->have_sigs[LOCAL] = false;
+	peer->have_sigs[REMOTE] = false;
+	peer->channel_local_active = false;
+
 	channel_announcement_negotiate(peer);
 	billboard_update(peer);
+
+	notleak(new_reltimer(&peer->timers, peer,
+			     time_from_sec(5),
+			     send_channel_initial_update, peer));
 }
 
 static void handle_peer_funding_locked(struct peer *peer, const u8 *msg)
@@ -4663,10 +4678,12 @@ static void handle_funding_depth(struct peer *peer, const u8 *msg)
 	if (peer->shutdown_sent[LOCAL])
 		return;
 
+	// Why does this fire every block up until 6 depth?? this seems a problem
+
 	if (depth < peer->channel->minimum_depth) {
 		peer->depth_togo = peer->channel->minimum_depth - depth;
 
-	} else {
+	} else if(depth >= 6) {
 		peer->depth_togo = 0;
 
 		/* If we know an actual short_channel_id prefer to use
@@ -4703,15 +4720,26 @@ static void handle_funding_depth(struct peer *peer, const u8 *msg)
 			assert(splicing);
 			peer->short_channel_ids[LOCAL] = *scid;
 
-			status_debug("funding_locked: sending commit index"
+			status_debug("splice_locked: sending commit index"
 				     " %"PRIu64": %s",
 				     peer->next_index[LOCAL],
 				     type_to_string(tmpctx, struct pubkey,
 						    &peer->next_local_per_commit));
-
 			msg = towire_splice_locked(NULL,
 						   &peer->channel_id,
 						   &peer->next_local_per_commit);
+
+			peer->short_channel_ids[REMOTE] = *scid;
+			peer->have_sigs[LOCAL] = false;
+			peer->have_sigs[REMOTE] = false;
+
+			// Need to wait here for both sides to catch up
+			// lock magic
+			sleep(6);
+
+			msg = towire_splice_locked(NULL,
+						  &peer->channel_id,
+						  &peer->next_local_per_commit);
 
 			peer_write(peer->pps, take(msg));
 		}

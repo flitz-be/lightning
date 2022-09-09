@@ -1,5 +1,6 @@
 #include "config.h"
 #include <ccan/cast/cast.h>
+#include <ccan/mem/mem.h>
 #include <channeld/channeld_wiregen.h>
 #include <common/json_command.h>
 #include <common/json_param.h>
@@ -342,7 +343,7 @@ static void send_splice_tx(struct channel *channel,
 	// TODO: when adding to inflights store next_htlc_id
 
 	log_debug(channel->log,
-		  "Broadcasting funding tx %s for channel %s.",
+		  "Broadcasting splice tx %s for channel %s.",
 		  tal_hex(tmpctx, tx_bytes),
 		  type_to_string(tmpctx, struct channel_id, &channel->cid));
 
@@ -881,6 +882,22 @@ static void handle_channel_upgrade(struct channel *channel,
 	wallet_channel_save(channel->peer->ld->wallet, channel);
 }
 
+static bool get_inflight_outpoint_index(struct channel *channel,
+					u32 *index,
+					const struct bitcoin_txid *txid)
+{
+	struct channel_inflight *inflight;
+
+	list_for_each(&channel->inflights, inflight, list) {
+		if(bitcoin_txid_eq(txid, &inflight->funding->outpoint.txid)) {
+			*index = inflight->funding->outpoint.n;
+			return true;
+		}
+	}
+
+	return false;
+}
+
 static void handle_channel_get_inflight(struct channel *channel,
 					const u8 *msg)
 {
@@ -1269,6 +1286,7 @@ bool channel_tell_depth(struct lightningd *ld,
 {
 	const char *txidstr;
 	struct txlocator *loc;
+	u32 outnum;
 
 	txidstr = type_to_string(tmpctx, struct bitcoin_txid, txid);
 	channel->depth = depth;
@@ -1282,8 +1300,17 @@ bool channel_tell_depth(struct lightningd *ld,
 
 	if(channel->state == CHANNELD_AWAITING_SPLICE && depth >= 6) {
 
+		// todo: do below
+
 		// TODO: Need to gossip channel close for old channel
 		// and gossip channel open for new channel
+
+		if (!get_inflight_outpoint_index(channel, &outnum, txid)) {
+			channel_fail_permanent(channel,
+					       REASON_LOCAL,
+					       "Can't locate splice inflight");
+			return false;
+		}
 
 		loc = wallet_transaction_locate(tmpctx, ld->wallet, txid);
 
@@ -1297,7 +1324,7 @@ bool channel_tell_depth(struct lightningd *ld,
 
 		if (!mk_short_channel_id(channel->scid,
 					 loc->blkheight, loc->index,
-					 69)) {
+					 outnum)) {
 
 			channel_fail_permanent(channel,
 					       REASON_LOCAL,
@@ -1314,9 +1341,11 @@ bool channel_tell_depth(struct lightningd *ld,
 
 		if(depth >= 6) {
 
-			// u8 *msg = towire_channeld_inflight_mindepth(NULL, txid, depth);
+			u8 *msg = towire_channeld_inflight_mindepth(NULL,
+								    txid, 
+								    depth);
 
-			// subd_send_msg(channel->owner, take(msg));
+			subd_send_msg(channel->owner, take(msg));
 		}
 	}
 
