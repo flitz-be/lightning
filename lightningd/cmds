@@ -7,6 +7,8 @@ cmds
 
 cd Development/lightningTwo
 
+source contrib/startup_regtest.sh
+
 stop_ln
 rm -rf "$PATH_TO_BITCOIN"
 
@@ -46,6 +48,9 @@ l1-cli splice_signed $PEER_ID $PSBT
 INVOICE=`l2-cli invoice 10000 test2 test2 | jq -r .bolt11`
 l1-cli pay $INVOICE
 
+
+
+
 bt-cli generatetoaddress 6 $ADDRESS
 
 INVOICE=`l2-cli invoice 10000 test6blocks test6blocks | jq -r .bolt11`
@@ -57,6 +62,7 @@ INVOICE=`l2-cli invoice 10000 test12blocks test12blocks | jq -r .bolt11`
 l1-cli pay $INVOICE
 
 
+bt-cli generatetoaddress 1 $ADDRESS
 
 
 

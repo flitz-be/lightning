@@ -1125,6 +1125,13 @@ class LightningRpc(UnixDomainSocketRpc):
         }
         return self.call("openchannel_abort", payload)
 
+    def splice_init(self, peer_id):
+        """ Initiate a splice """
+        payload = {
+            "id": peer_id
+        }
+        return self.call("splice_init", payload)
+
     def paystatus(self, bolt11=None):
         """Detail status of attempts to pay {bolt11} or any."""
         payload = {

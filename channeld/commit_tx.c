@@ -10,20 +10,20 @@
 #include <unistd.h>
 #include <stdio.h>
 
-#undef SUPERVERBOSE
-#define SUPERVERBOSE(...) \
-	do { char buf[2048]; sprintf(buf, __VA_ARGS__); DLOG(buf); } while(0)
-// #endif
+#ifndef SUPERVERBOSE
+#define SUPERVERBOSE(...)
+	// do { char buf[2048]; sprintf(buf, __VA_ARGS__); DLOG(buf); } while(0)
+#endif
 
-static void DLOG(const char *str)
-{
-	int fd = open("/tmp/dustin.txt", O_CREAT|O_RDWR|O_APPEND);
+// static void DLOG(const char *str)
+// {
+// 	int fd = open("/tmp/dustin.txt", O_CREAT|O_RDWR|O_APPEND);
 
-	write(fd, str, strlen(str));
-	write(fd, "\n", 1);
+// 	write(fd, str, strlen(str));
+// 	write(fd, "\n", 1);
 
-	close(fd);
-}
+// 	close(fd);
+// }
 
 static bool trim(const struct htlc *htlc,
 		 u32 feerate_per_kw,
@@ -82,9 +82,9 @@ static void add_offered_htlc_out(struct bitcoin_tx *tx, size_t n,
 	p2wsh = scriptpubkey_p2wsh(tx, wscript);
 	bitcoin_tx_add_output(tx, p2wsh, wscript, amount);
 	SUPERVERBOSE("testsss");
-	SUPERVERBOSE("# HTLC #%llu offered amount %llu wscript %s\n", htlc->id,
-		     amount.satoshis, /* Raw: BOLT 3 output match */
-		     tal_hex(wscript, wscript));
+	// SUPERVERBOSE("# HTLC #%llu offered amount %llu wscript %s\n", htlc->id,
+	// 	     amount.satoshis, /* Raw: BOLT 3 output match */
+	// 	     tal_hex(wscript, wscript));
 	tal_free(wscript);
 }
 
@@ -105,10 +105,10 @@ static void add_received_htlc_out(struct bitcoin_tx *tx, size_t n,
 
 	bitcoin_tx_add_output(tx, p2wsh, wscript, amount);
 
-	SUPERVERBOSE("# HTLC #%llu received amount %llu wscript %s\n",
-		     htlc->id,
-		     amount.satoshis, /* Raw: BOLT 3 output match */
-		     tal_hex(wscript, wscript));
+	// SUPERVERBOSE("# HTLC #%llu received amount %llu wscript %s\n",
+	// 	     htlc->id,
+	// 	     amount.satoshis, /* Raw: BOLT 3 output match */
+	// 	     tal_hex(wscript, wscript));
 	tal_free(wscript);
 }
 
@@ -172,8 +172,8 @@ struct bitcoin_tx *commit_tx(const tal_t *ctx,
 	base_fee = commit_tx_base_fee(feerate_per_kw, untrimmed,
 				      option_anchor_outputs);
 
-	SUPERVERBOSE("# base commitment transaction fee = %llu\n",
-		     base_fee.satoshis /* Raw: spec uses raw numbers */);
+	// SUPERVERBOSE("# base commitment transaction fee = %llu\n",
+	// 	     base_fee.satoshis /* Raw: spec uses raw numbers */);
 
 	/* BOLT #3:
 	 * If `option_anchors` applies to the commitment
@@ -207,8 +207,8 @@ struct bitcoin_tx *commit_tx(const tal_t *ctx,
 		if (amount_msat_greater_eq_sat(other_pay, dust_limit))
 			ok &= amount_sat_add(&out, out, amount_msat_to_sat_round_down(other_pay));
 		assert(ok);
-		SUPERVERBOSE("# actual commitment transaction fee = %llu\n",
-			     funding_sats.satoshis - out.satoshis);  /* Raw: test output */
+		// SUPERVERBOSE("# actual commitment transaction fee = %llu\n",
+		// 	     funding_sats.satoshis - out.satoshis);  /* Raw: test output */
 	}
 #endif
 
@@ -287,9 +287,9 @@ struct bitcoin_tx *commit_tx(const tal_t *ctx,
 		(*htlcmap)[n] = direct_outputs ? dummy_to_local : NULL;
 		/* We don't assign cltvs[n]: if we use it, order doesn't matter.
 		 * However, valgrind will warn us something wierd is happening */
-		SUPERVERBOSE("# to_local amount %llu wscript %s\n",
-			     amount.satoshis, /* Raw: BOLT 3 output match */
-			     tal_hex(tmpctx, wscript));
+		// SUPERVERBOSE("# to_local amount %llu wscript %s\n",
+		// 	     amount.satoshis, /* Raw: BOLT 3 output match */
+		// 	     tal_hex(tmpctx, wscript));
 		n++;
 		to_local = true;
 	} else
@@ -347,10 +347,10 @@ struct bitcoin_tx *commit_tx(const tal_t *ctx,
 		(*htlcmap)[n] = direct_outputs ? dummy_to_remote : NULL;
 		/* We don't assign cltvs[n]: if we use it, order doesn't matter.
 		 * However, valgrind will warn us something wierd is happening */
-		SUPERVERBOSE("# to_remote amount %llu P2WPKH(%s)\n",
-			     amount.satoshis, /* Raw: BOLT 3 output match */
-			     type_to_string(tmpctx, struct pubkey,
-					    &keyset->other_payment_key));
+//		SUPERVERBOSE("# to_remote amount %llu P2WPKH(%s)\n",
+//			     amount.satoshis, /* Raw: BOLT 3 output match */
+//			     type_to_string(tmpctx, struct pubkey,
+//					    &keyset->other_payment_key));
 		n++;
 
 		to_remote = true;
