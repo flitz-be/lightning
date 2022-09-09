@@ -3298,6 +3298,11 @@ static const struct json_command openchannel_update_command = {
 	"If {commitments_secured} is true, next call should be to openchannel_signed"
 };
 
+/* behavior:
+* goes until changes run out?
+* goes until it receives tx_complete
+*/
+
 static const struct json_command openchannel_signed_command = {
 	"openchannel_signed",
 	"channels",

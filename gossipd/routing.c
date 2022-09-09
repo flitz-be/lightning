@@ -114,7 +114,6 @@ static void destroy_unupdated_channel(struct unupdated_channel *uc,
 				      struct routing_state *rstate)
 {
 	status_debug("destroy_unupdated_channel");
-	status_debug("uintmap_del: %llu", uc->scid.u64);
 	uintmap_del(&rstate->unupdated_chanmap, uc->scid.u64);
 }
 
@@ -268,7 +267,6 @@ void add_to_txout_failures(struct routing_state *rstate,
 			   const struct short_channel_id *scid)
 {
 	status_debug("add_to_txout_failures");
-	status_debug("rstate->txout_failures uintmap_add: %llu", scid->u64);
 	if (uintmap_add(&rstate->txout_failures, scid->u64, true)
 	    && ++rstate->num_txout_failures == 10000) {
 		tal_free(rstate->txout_failure_timer);
@@ -632,7 +630,6 @@ struct chan *new_chan(struct routing_state *rstate,
 	init_half_chan(rstate, chan, n1idx);
 	init_half_chan(rstate, chan, !n1idx);
 
-	status_debug("rstate->chanmap uintmap_add: %llu", scid->u64);
 	uintmap_add(&rstate->chanmap, scid->u64, chan);
 
 	return chan;
@@ -977,7 +974,6 @@ bool routing_add_channel_announcement(struct routing_state *rstate,
 	uc->id[0] = node_id_1;
 	uc->id[1] = node_id_2;
 	set_softref(uc, &uc->peer_softref, peer);
-	status_debug("rstate->unupdated_chanmap uintmap_add: %llu", scid.u64);
 	uintmap_add(&rstate->unupdated_chanmap, scid.u64, uc);
 	tal_add_destructor2(uc, destroy_unupdated_channel, rstate);
 
@@ -2013,7 +2009,6 @@ void route_prune(struct routing_state *rstate)
 	     uc;
 	     uc = uintmap_after(&rstate->unupdated_chanmap, &idx)) {
 		if (uc->added.ts.tv_sec < highwater) {
-			status_debug("tal_free unupdated_chanmap: %llud", idx);
 			tal_free(uc);
 		}
 	}
@@ -2152,7 +2147,6 @@ void remove_all_gossip(struct routing_state *rstate)
 
 	/* Now free all the channels. */
 	while ((c = uintmap_first(&rstate->chanmap, &index)) != NULL) {
-		status_debug("uintmap_del: %llu", index);
 		uintmap_del(&rstate->chanmap, index);
 #if DEVELOPER
 		c->sat = amount_sat((unsigned long)c);

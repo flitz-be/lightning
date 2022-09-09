@@ -775,7 +775,7 @@ static const struct config testnet_config = {
 	.locktime_max = 14 * 24 * 6,
 
 	/* We're fairly trusting, under normal circumstances. */
-	.anchor_confirms = 1,
+	.anchor_confirms = 6,
 
 	/* Testnet blockspace is free. */
 	.max_concurrent_htlcs = 483,

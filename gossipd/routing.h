@@ -261,7 +261,6 @@ static inline struct chan *
 get_channel(const struct routing_state *rstate,
 	    const struct short_channel_id *scid)
 {
-	status_debug("get_channel rstate->chanmap %llu", scid->u64);
 	return uintmap_get(&rstate->chanmap, scid->u64);
 }
 
