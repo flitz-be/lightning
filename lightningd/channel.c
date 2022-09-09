@@ -608,6 +608,52 @@ struct channel_inflight *channel_inflight_find(struct channel *channel,
 	return NULL;
 }
 
+struct channel *peer_normal_channel(struct peer *peer)
+{
+	struct channel *channel;
+
+	list_for_each(&peer->channels, channel, list) {
+		if (channel->state == CHANNELD_NORMAL
+		    || channel->state == CHANNELD_AWAITING_SPLICE)
+			return channel;
+	}
+	return NULL;
+}
+
+struct channel *active_channel_by_id(struct lightningd *ld,
+				     const struct node_id *id,
+				     struct uncommitted_channel **uc)
+{
+	struct peer *peer = peer_by_id(ld, id);
+	if (!peer) {
+		if (uc)
+			*uc = NULL;
+		return NULL;
+	}
+
+	if (uc)
+		*uc = peer->uncommitted_channel;
+	return peer_active_channel(peer);
+}
+
+struct channel *unsaved_channel_by_id(struct lightningd *ld,
+				      const struct node_id *id)
+{
+	struct peer *peer = peer_by_id(ld, id);
+	if (!peer)
+		return NULL;
+	return peer_unsaved_channel(peer);
+}
+
+struct channel *active_channel_by_scid(struct lightningd *ld,
+				       const struct short_channel_id *scid)
+{
+	struct channel *chan = any_channel_by_scid(ld, scid);
+	if (chan && !channel_active(chan))
+		chan = NULL;
+	return chan;
+}
+
 struct channel *any_channel_by_scid(struct lightningd *ld,
 				    const struct short_channel_id *scid,
 				    bool privacy_leak_ok)

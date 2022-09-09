@@ -430,6 +430,7 @@ static u32 timestamp_for_update(struct daemon *daemon,
 				const u32 *prev_timestamp,
 				bool disable)
 {
+	status_debug("timestamp_for_update");
 	u32 timestamp = gossip_time_now(daemon->rstate).ts.tv_sec;
 
 	/* Create an unsigned channel_update: we backdate enables, so
@@ -458,6 +459,7 @@ static u8 *sign_and_timestamp_update(const tal_t *ctx,
 				     int direction,
 				     u8 *unsigned_update TAKES)
 {
+	status_debug("sign_and_timestamp_update");
 	u8 *msg, *update;
 	be32 timestamp;
 	const u32 *prev_timestamp;
@@ -516,6 +518,7 @@ static u8 *create_unsigned_update(const tal_t *ctx,
 				  u32 fee_proportional_millionths,
 				  bool splicing)
 {
+	status_debug("create_unsigned_update");
 	secp256k1_ecdsa_signature dummy_sig;
 	u8 message_flags, channel_flags;
 
@@ -571,6 +574,7 @@ static void apply_update(struct daemon *daemon,
 			 int direction,
 			 u8 *update TAKES)
 {
+	status_debug("apply_update");
 	u8 *msg;
 	struct peer *peer = find_peer(daemon, &chan->nodes[!direction]->id);
 
@@ -606,6 +610,7 @@ static void sign_timestamp_and_apply_update(struct daemon *daemon,
 					    int direction,
 					    u8 *update TAKES)
 {
+	status_debug("sign_timestamp_and_apply_update");
 	update = sign_and_timestamp_update(NULL, daemon, chan, direction,
 					   update);
 	apply_update(daemon, chan, direction, take(update));
@@ -631,6 +636,7 @@ struct deferred_update {
 static struct deferred_update *find_deferred_update(struct daemon *daemon,
 						    const struct chan *chan)
 {
+	status_debug("find_deferred_update");
 	struct deferred_update *du;
 
 	list_for_each(&daemon->deferred_updates, du, list) {
@@ -642,11 +648,13 @@ static struct deferred_update *find_deferred_update(struct daemon *daemon,
 
 static void destroy_deferred_update(struct deferred_update *du)
 {
+	status_debug("destroy_deferred_update");
 	list_del(&du->list);
 }
 
 static void apply_deferred_update(struct deferred_update *du)
 {
+	status_debug("apply_deferred_update");
 	apply_update(du->daemon, du->chan, du->direction, take(du->update));
 	tal_free(du);
 }
@@ -657,6 +665,7 @@ static void defer_update(struct daemon *daemon,
 			 int direction,
 			 u8 *unsigned_update TAKES)
 {
+	status_debug("defer_update");
 	struct deferred_update *du;
 
 	/* Override any existing one */
@@ -683,6 +692,7 @@ static void defer_update(struct daemon *daemon,
 /* If there is a pending update for this local channel, apply immediately. */
 static bool local_channel_update_latest(struct daemon *daemon, struct chan *chan)
 {
+	status_debug("local_channel_update_latest");
 	struct deferred_update *du;
 
 	du = find_deferred_update(daemon, chan);
@@ -698,6 +708,7 @@ static bool local_channel_update_latest(struct daemon *daemon, struct chan *chan
 static u8 *prev_update(const tal_t *ctx,
 		       struct daemon *daemon, const struct chan *chan, int direction)
 {
+	status_debug("prev_update");
 	u8 *prev;
 
 	if (!is_halfchan_defined(&chan->half[direction]))
@@ -717,6 +728,7 @@ static u8 *prev_update(const tal_t *ctx,
 void refresh_local_channel(struct daemon *daemon,
 			   struct chan *chan, int direction)
 {
+	status_debug("refresh_local_channel");
 	u16 cltv_expiry_delta;
 	struct amount_msat htlc_minimum, htlc_maximum;
 	u32 fee_base_msat, fee_proportional_millionths, timestamp;
@@ -783,6 +795,7 @@ void refresh_local_channel(struct daemon *daemon,
 /* channeld (via lightningd) asks us to update the local channel. */
 void handle_local_channel_update(struct daemon *daemon, const u8 *msg)
 {
+	status_debug("handle_local_channel_update");
 	struct node_id id;
 	struct short_channel_id scid;
 	bool disable;

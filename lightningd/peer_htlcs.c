@@ -1854,7 +1854,8 @@ static bool valid_commitment_tx(struct channel *channel,
 
 static bool peer_save_commitsig_received(struct channel *channel, u64 commitnum,
 					 struct bitcoin_tx *tx,
-					 const struct bitcoin_signature *commit_sig)
+					 const struct bitcoin_signature *commit_sig,
+					 struct bitcoin_signature **inflight_commit_sigs)
 {
 	if (commitnum != channel->next_index[LOCAL]) {
 		channel_internal_error(channel,
@@ -2113,6 +2114,7 @@ void peer_got_commitsig(struct channel *channel, const u8 *msg)
 	struct failed_htlc **failed;
 	struct changed_htlc *changed;
 	struct bitcoin_tx *tx;
+	struct bitcoin_signature *inflight_commit_sigs;
 	size_t i;
 	struct lightningd *ld = channel->peer->ld;
 
@@ -2126,7 +2128,8 @@ void peer_got_commitsig(struct channel *channel, const u8 *msg)
 					    &fulfilled,
 					    &failed,
 					    &changed,
-					    &tx)
+					    &tx,
+					    &inflight_commit_sigs)
 	    || !fee_states_valid(fee_states, channel->opener)
 	    || !height_states_valid(blockheight_states, channel->opener)) {
 		channel_internal_error(channel,
@@ -2201,7 +2204,8 @@ void peer_got_commitsig(struct channel *channel, const u8 *msg)
 	if (!peer_sending_revocation(channel, added, fulfilled, failed, changed))
 		return;
 
-	if (!peer_save_commitsig_received(channel, commitnum, tx, &commit_sig))
+	if (!peer_save_commitsig_received(channel, commitnum, tx, &commit_sig,
+					  &inflight_commit_sigs))
 		return;
 
 	wallet_channel_save(ld->wallet, channel);
