@@ -1982,6 +1982,7 @@ static u8 *accepter_commits(struct state *state,
 #else
 	commit_msg = towire_commitment_signed(NULL, &state->channel_id,
 					      &local_sig.s, NULL);
+#endif
 
 	peer_write(state->pps, take(commit_msg));
 
@@ -3954,8 +3955,6 @@ int main(int argc, char *argv[])
 		tal_steal(state->tx_state, state->tx_state->psbt);
 	} else
 		master_badmsg(fromwire_peektype(msg), msg);
-
-
 
 	/* 3 == peer, 4 = hsmd */
 	state->pps = new_per_peer_state(state);
