@@ -1122,6 +1122,7 @@ static void connect_activate_subd(struct lightningd *ld, struct channel *channel
 
 	case CHANNELD_AWAITING_LOCKIN:
 	case CHANNELD_NORMAL:
+	case CHANNELD_AWAITING_SPLICE:
 	case CHANNELD_SHUTTING_DOWN:
 	case CLOSINGD_SIGEXCHANGE:
 		assert(!channel->owner);

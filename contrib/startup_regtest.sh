@@ -274,21 +274,21 @@ splice() {
 	fi
 
 	echo "get peer id"
-	PEER_ID=`"$LCLI" --lightning-dir=/tmp/l1-regtest listpeers | jq -r ".peers[0].id"`
+	PEER_ID=$("$LCLI" --lightning-dir=/tmp/l1-regtest listpeers | jq -r ".peers[0].id")
 	echo "splice init"
-	PSBT=`"$LCLI" --lightning-dir=/tmp/l1-regtest splice_init $PEER_ID | jq -r ".psbt"`
+	PSBT=$("$LCLI" --lightning-dir=/tmp/l1-regtest splice_init $PEER_ID | jq -r ".psbt")
 	echo "get funds"
-	PSBT_FUNDS=`"$LCLI" --lightning-dir=/tmp/l1-regtest fundpsbt 100000sat slow 166 | jq -r ".psbt"`
+	PSBT_FUNDS=$("$LCLI" --lightning-dir=/tmp/l1-regtest fundpsbt 100000sat slow 166 | jq -r ".psbt")
 	echo "join psbts"
-	PSBT=`bitcoin-cli -regtest joinpsbts "[\"$PSBT\", \"$PSBT_FUNDS\"]"`
+	PSBT=$(bitcoin-cli -regtest joinpsbts "[\"$PSBT\", \"$PSBT_FUNDS\"]")
 	echo "splice update"
-	PSBT=`"$LCLI" --lightning-dir=/tmp/l1-regtest splice_update $PEER_ID $PSBT | jq -r ".psbt"`
+	PSBT=$("$LCLI" --lightning-dir=/tmp/l1-regtest splice_update $PEER_ID $PSBT | jq -r ".psbt")
 	echo "splice finalize"
-	PSBT=`"$LCLI" --lightning-dir=/tmp/l1-regtest splice_finalize $PEER_ID | jq -r ".psbt"`
+	PSBT=$("$LCLI" --lightning-dir=/tmp/l1-regtest splice_finalize $PEER_ID | jq -r ".psbt")
 	echo "signpsbt"
-	PSBT=`"$LCLI" --lightning-dir=/tmp/l1-regtest signpsbt -k psbt="$PSBT" | jq -r ".signed_psbt"`
+	PSBT=$("$LCLI" --lightning-dir=/tmp/l1-regtest signpsbt -k psbt="$PSBT" | jq -r ".signed_psbt")
 	echo "splice_signed"
-	PSBT=`"$LCLI" --lightning-dir=/tmp/l1-regtest splice_signed "$PEER_ID" "$PSBT" | jq -r ".signed_psbt"`
+	PSBT=$("$LCLI" --lightning-dir=/tmp/l1-regtest splice_signed "$PEER_ID" "$PSBT" | jq -r ".signed_psbt")
 
 	sleep 1
 

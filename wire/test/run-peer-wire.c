@@ -586,7 +586,7 @@ static struct msg_commitment_signed *fromwire_struct_commitment_signed(const tal
 				&s->channel_id,
 				&s->signature,
 				&s->htlc_signature,
-				&s->tlvs))
+				NULL))
 		return tal_free(s);
 	return s;
 #else
