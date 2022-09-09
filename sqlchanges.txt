@@ -35,10 +35,16 @@ CREATE TABLE channel_htlcs
 * old channel record will get cleaned later
 * inflights will get cleaned later (cause channel dbid change)
 
-ALTER TABLE htlc_sigs ADD inflight_id BLOB REFERENCES channel_funding_inflights(funding_tx_id);
+ALTER TABLE htlc_sigs ADD inflight_id BLOB REFERENCES channel_funding_inflights(funding_tx_id)
 ALTER TABLE channel_funding_inflights ADD starting_htlc_id INTEGER DEFAULT 0
 
+
+Not the solution:
+-- CREATE UNIQUE INDEX channel_funding_inflights_channel_id ON channel_funding_inflights(channel_id)
+
 TODO: think about sorting channel_funding_inflights by feerate
+answer-> the ids should already be sorted by feerate
+
 
 
 CREATE TABLE htlc_sigs

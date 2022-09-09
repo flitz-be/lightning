@@ -883,6 +883,10 @@ static struct migration dbmigrations[] = {
      * in routehints in invoices. The peer will remember all the
      * aliases, but we only ever need one. */
     {SQL("ALTER TABLE channels ADD alias_remote BIGINT DEFAULT NULL"), NULL},
+    /* Splicing requires us to store HTLC sigs for inflight splices and allows us to discard old sigs after splice confirmation. */
+    {SQL("ALTER TABLE htlc_sigs ADD inflight_id BLOB REFERENCES channel_funding_inflights(funding_tx_id)"), NULL},
+    {SQL("ALTER TABLE channel_funding_inflights ADD starting_htlc_id INTEGER DEFAULT 0"), NULL},
+    {SQL("CREATE UNIQUE INDEX channel_funding_inflights_channel_id ON channel_funding_inflights(funding_tx_id)"), NULL},
 };
 
 /**
