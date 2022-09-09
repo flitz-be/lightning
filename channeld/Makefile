@@ -1,6 +1,6 @@
 #! /usr/bin/make
 
-CHANNELD_HEADERS :=			\
+CHANNELD_HEADERS :=				\
 	channeld/full_channel_error_names_gen.h	\
 	channeld/channeld_wiregen.h		\
 	channeld/channeld_htlc.h		\
@@ -10,7 +10,7 @@ CHANNELD_HEADERS :=			\
 	channeld/full_channel_error.h		\
 	channeld/watchtower.h
 
-CHANNELD_SRC := channeld/channeld.c	\
+CHANNELD_SRC := channeld/channeld.c		\
 	channeld/commit_tx.c			\
 	channeld/full_channel.c			\
 	channeld/channeld_wiregen.c		\
@@ -53,6 +53,7 @@ CHANNELD_COMMON_OBJS :=				\
 	common/status_wiregen.o			\
 	common/gossip_store.o			\
 	common/hmac.o				\
+	common/interactivetx.o			\
 	common/htlc_state.o			\
 	common/htlc_trim.o			\
 	common/htlc_tx.o			\
