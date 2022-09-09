@@ -320,6 +320,12 @@ struct bitcoin_tx **channel_txs(const tal_t *ctx,
 					      &channel->funding_pubkey[side],
 					      &channel->funding_pubkey[!side]);
 
+		// Make these parameters
+			     // struct amount_sat funding_sats, // diff
+			     // const struct pubkey *local_funding_key, // diff
+			     // const struct pubkey *remote_funding_key, // diff
+			     // u32 blockheight, // diff
+
 	txs = tal_arr(ctx, struct bitcoin_tx *, 1);
 	txs[0] = commit_tx(
 	    ctx, &channel->funding,

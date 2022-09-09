@@ -97,17 +97,17 @@ static void add_received_htlc_out(struct bitcoin_tx *tx, size_t n,
 }
 
 struct bitcoin_tx *commit_tx(const tal_t *ctx,
-			     const struct bitcoin_outpoint *funding,
-			     struct amount_sat funding_sats,
-			     const struct pubkey *local_funding_key,
-			     const struct pubkey *remote_funding_key,
+			     const struct bitcoin_outpoint *funding, // diff
+			     struct amount_sat funding_sats, // diff
+			     const struct pubkey *local_funding_key, // diff
+			     const struct pubkey *remote_funding_key, // diff
 			     enum side opener,
 			     u16 to_self_delay,
 			     u32 lease_expiry,
-			     u32 blockheight,
+			     u32 blockheight, // diff
 			     const struct keyset *keyset,
 			     u32 feerate_per_kw,
-			     struct amount_sat dust_limit,
+			     struct amount_sat dust_limit,  // diff?
 			     struct amount_msat self_pay,
 			     struct amount_msat other_pay,
 			     const struct htlc **htlcs,

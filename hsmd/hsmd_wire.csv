@@ -220,6 +220,7 @@ msgdata,hsmd_sign_mutual_close_tx,remote_funding_key,pubkey,
 msgtype,hsmd_sign_splice_tx,28
 msgdata,hsmd_sign_splice_tx,tx,bitcoin_tx,
 msgdata,hsmd_sign_splice_tx,remote_funding_key,pubkey,
+msgdata,hsmd_sign_splice_tx,input_index,u32,
 
 # Reply for all the above requests.
 msgtype,hsmd_sign_tx_reply,112

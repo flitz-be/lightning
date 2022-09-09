@@ -49,6 +49,18 @@
 #include <wally_bip32.h>
 #include <wire/peer_wire.h>
 #include <wire/wire_sync.h>
+#include <stdio.h>
+
+
+static void DLOG(const char *str)
+{
+	int fd = open("/tmp/dustin.txt", O_CREAT|O_RDWR|O_APPEND);
+
+	write(fd, str, strlen(str));
+	write(fd, "\n", 1);
+
+	close(fd);
+}
 
 /* stdin == requests, 3 == peer, 4 = HSM */
 #define MASTER_FD STDIN_FILENO
@@ -158,6 +170,12 @@ struct peer {
 	/* If set, send_commit will resend all commitments */
 	// TODO: Rename this send htlc commitments for a given splice txid
 	bool resend_all_commitments;
+	/* Track how many of each tx collab msg we receive */
+	u16 tx_msg_count[INTERACTIVETX_NUM_TX_MSGS];
+	/* Current negoitated psbt */
+	struct wally_psbt *current_psbt;
+	/* If, in the last splice_update, we tx_complete was received */
+	bool received_tx_complete;
 #endif
 
 #if DEVELOPER
@@ -242,6 +260,8 @@ static void maybe_send_stfu(struct peer *peer)
 {
 	if (!peer->stfu)
 		return;
+
+	// if you're in stfu just return
 
 	if (!peer->stfu_sent[LOCAL] && !pending_updates(peer->channel, LOCAL, false)) {
 		u8 *msg = towire_stfu(NULL, &peer->channel_id,
@@ -1348,6 +1368,9 @@ static void send_commit(struct peer *peer)
 	 */
 	for(u32 i = 0; ; i++) {
 
+		// TODO: Synchronously sending & receiving inflight data is problematic.
+		break;
+
 		u8 *msg;
 		bool is_found;
 		struct bitcoin_outpoint outpoint;
@@ -1879,6 +1902,11 @@ static void handle_peer_commit_sig(struct peer *peer, const u8 *msg)
 
 	/* We may now be quiescent on our side. */
 	maybe_send_stfu(peer);
+	// this is to catch the case where we try to splice but we're already in
+	// stfu mode for something else, this catch gives the splice that's waiting
+	// for it to activate.
+	// 
+	// this happens if you have updates pending.
 
 	/* This might have synced the feerates: if so, we may want to
 	 * update */
@@ -2363,7 +2391,9 @@ static struct wally_psbt *next_splice_step(struct interactivetx_context *ictx)
 
 static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 {
+	u8 *redeemscript;
 	const u8 *msg;
+	enum peer_wire type;
 	struct interactivetx_context ictx;
 
 	msg = towire_splice_ack(tmpctx,
@@ -2392,18 +2422,81 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 	ictx.next_update = next_splice_step;
 	ictx.current_psbt = NULL;
 	ictx.desired_psbt = NULL;
+	ictx.pause_when_complete = false;
 
-	char *error = process_interactivetx_updates(&ictx);
+	//TODO: Sometimes the PSBT has an asset fail on
+	// &orig->inputs[i].unknowns
+	// not having a serial_id set.
 
-	if(error) { // error is "Invalid tx sent."
+	char *error = process_interactivetx_updates(&ictx, NULL);
+
+	if(error) {
 
 		peer_failed_err(peer->pps, &peer->channel_id,
 				"Interactive splicing error: %s", error);
 	}
 
-	struct wally_tx_output *newChanOutpoint = &ictx.current_psbt->tx->outputs[0];
+	psbt_sort_by_serial_id(ictx.current_psbt);
 
-	newChanOutpoint->satoshi = peer->channel->funding_sats.satoshis - 500;
+	// struct wally_tx_output *newChanOutpoint = &ictx.current_psbt->tx->outputs[0];
+
+	// newChanOutpoint->satoshi = peer->channel->funding_sats.satoshis - 500;
+
+	redeemscript = bitcoin_redeem_2of2(NULL,
+					   &peer->channel->funding_pubkey[0],
+					   &peer->channel->funding_pubkey[1]);
+
+	int splice_funding_index = -1;
+
+	for(int i = 0; i < ictx.current_psbt->num_inputs; i++) {
+
+		struct wally_psbt_input *in =
+			&ictx.current_psbt->inputs[i];
+
+		if(in->witness_script_len != tal_bytelen(redeemscript))
+			continue;
+
+		if(0 != memcmp(in->witness_script,
+			       redeemscript, 
+			       in->witness_script_len)) {
+
+			continue;
+		}
+
+		splice_funding_index = i;
+	}
+
+	if(splice_funding_index == -1)
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "Unable to find splice funding tx");
+
+	int chan_output_index = 0;
+
+	struct wally_tx_output *newChanOutpoint = &ictx.current_psbt->tx->outputs[chan_output_index];
+
+	u64 total_in = 0;
+	u64 change_out = 0;
+
+	for(int i = 0; i < ictx.current_psbt->tx->num_inputs; i++) {
+
+		u64 amount = psbt_input_get_amount(ictx.current_psbt, i).satoshis;
+
+		if(!amount)
+			peer_failed_warn(peer->pps, &peer->channel_id,
+					 "Input %d of splice does not have an input amount",
+					 i);
+
+		total_in += amount;
+	}
+
+	/* i = 1 to skip the first output (which is our new channel output!) */
+
+	for(int i = 1; i < ictx.current_psbt->tx->num_outputs; i++)
+		change_out += psbt_output_get_amount(ictx.current_psbt, i).satoshis;
+
+	u64 miner_fee = 1000;
+
+	newChanOutpoint->satoshi = total_in - change_out - miner_fee;
 
 	psbt_elements_normalize_fees(ictx.current_psbt);
 
@@ -2431,25 +2524,25 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 						     our_funding_sats, /* <- todo */
 						     ictx.current_psbt));
 
-	peer->resend_all_commitments = true;
+	// peer->resend_all_commitments = true;
 
-	send_commit(peer);
+	// send_commit(peer);
 
-	msg = peer_read(tmpctx, peer->pps);
+	// msg = peer_read(tmpctx, peer->pps);
 
-	enum peer_wire type = fromwire_peektype(msg);
+	// type = fromwire_peektype(msg);
 
-	if (handle_peer_error(peer->pps, &peer->channel_id, msg))
-		return;
+	// if (handle_peer_error(peer->pps, &peer->channel_id, msg))
+	// 	return;
 
-	if(type != WIRE_COMMITMENT_SIGNED) {
+	// if(type != WIRE_COMMITMENT_SIGNED) {
 
-		peer_failed_warn(peer->pps, &peer->channel_id,
-				"Splicing got incorrect message from peer: %d "
-				"(should be WIRE_COMMITMENT_SIGNED)", type);
-	}
+	// 	peer_failed_warn(peer->pps, &peer->channel_id,
+	// 			"Splicing got incorrect message from peer: %d "
+	// 			"(should be WIRE_COMMITMENT_SIGNED)", type);
+	// }
 
-	handle_peer_commit_sig(peer, msg);
+	// handle_peer_commit_sig(peer, msg);
 
 	msg = peer_read(tmpctx, peer->pps);
 
@@ -2482,8 +2575,16 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 
 	bitcoin_tx = bitcoin_tx_with_psbt(tmpctx, ictx.current_psbt);
 
+	char buf[2048];
+
+	snprintf(buf, 2048, "Passive splice peer tx be4 signing: %s",
+		tal_hex(tmpctx, linearize_tx(tmpctx, bitcoin_tx)));
+
+	DLOG(buf);
+
 	msg = towire_hsmd_sign_splice_tx(tmpctx, bitcoin_tx,
-					 &peer->channel->funding_pubkey[REMOTE]);
+					 &peer->channel->funding_pubkey[REMOTE],
+					 splice_funding_index);
 
 	msg = hsm_req(tmpctx, take(msg));
 	if (!fromwire_hsmd_sign_tx_reply(msg, &splice_sig))
@@ -2501,7 +2602,7 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 	dump_htlcs(peer->channel, "Sending splice commit_sig!");
 
 	/* Set the splice_sig on the splice funding tx psbt */
-	if (!psbt_input_set_signature(ictx.current_psbt, 0,
+	if (!psbt_input_set_signature(ictx.current_psbt, splice_funding_index,
 				      &peer->channel->funding_pubkey[LOCAL],
 				      &splice_sig))
 		status_failed(STATUS_FAIL_INTERNAL_ERROR,
@@ -2533,14 +2634,54 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 
 	peer_write(peer->pps, take(msg));
 
+	int final_sigs_cnt =
+		psbt_finalize_multisig_signatures(NULL,
+						  &ictx.current_psbt->inputs[splice_funding_index]);
+
+	snprintf(buf, 1024, "final_sigs_cnt: %d", final_sigs_cnt);
+
+	DLOG(buf);
+}
+
+static struct bitcoin_tx *bitcoin_tx_from_txid(struct peer *peer,
+					       struct bitcoin_txid txid)
+{
+	u8 *msg;
+	struct bitcoin_tx *tx;
+
+	msg = towire_channeld_splice_lookup_tx(NULL, &txid);
+
+	if (!wire_sync_write(MASTER_FD, msg))
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "Could not set sync write to master: %s",
+			      strerror(errno));
+
+	msg = wire_sync_read(tmpctx, MASTER_FD);
+	if (!msg)
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "Could not set sync read from master: %s",
+			      strerror(errno));
+
+	if (!fromwire_channeld_splice_lookup_tx_result(tmpctx, msg, &tx)) {
+
+		peer_failed_err(peer->pps,
+				&peer->channel_id,
+				"Invalid 'splice_lookup_tx_result' mesage"
+				" from daemon");
+	}
+
+	return tx;
 }
 
 static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 {
 	const u8 *redeemscript;
-	const u8 *msg;
+	u8 *outmsg;
 	struct interactivetx_context ictx;
+	struct bitcoin_tx *prev_tx;
 	u32 sequence = 0;
+
+	peer->received_tx_complete = false;
 
 	ictx.ctx = peer;
 	ictx.our_role = TX_INITIATOR;
@@ -2554,6 +2695,7 @@ static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 	ictx.next_update = next_splice_step;
 	ictx.current_psbt = NULL;
 	ictx.desired_psbt = create_psbt(tmpctx, 0, 0, 0);
+	ictx.pause_when_complete = true;
 
 	/* We go first as the receiver of the ack.
 	 *
@@ -2586,6 +2728,10 @@ static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 	psbt_input_set_wit_utxo(ictx.desired_psbt, 0,
 				scriptPubkey, peer->channel->funding_sats);
 
+	prev_tx = bitcoin_tx_from_txid(peer, peer->channel->funding.txid);
+
+	psbt_input_set_utxo(ictx.desired_psbt, 0, prev_tx->wtx);
+
 	/* Next we add the new channel outpoint, with a 0 amount for now. It
 	 * will be filled in later.
 	 * 
@@ -2599,23 +2745,238 @@ static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 			   scriptpubkey_p2wsh(tmpctx, redeemscript),
 			   amount_sat(0));
 
+	//TODO: Sometimes our peer assert fails on 
+	// &orig->inputs[i].unknowns
+	// not having a serial_id set.
+
 	psbt_add_serials(ictx.desired_psbt, ictx.our_role);
 	psbt_sort_by_serial_id(ictx.desired_psbt);
 
-	char *error = process_interactivetx_updates(&ictx);
+	char *error = process_interactivetx_updates(&ictx, &peer->received_tx_complete);
+
+	psbt_add_serials(ictx.current_psbt, ictx.our_role);
+	psbt_sort_by_serial_id(ictx.current_psbt);
 
 	if(error)
 		peer_failed_warn(peer->pps, &peer->channel_id,
-				"Interactive splicing error: %s", error);
+				"Interactive splicing_ack error: %s", error);
+
+	memcpy(peer->tx_msg_count, ictx.tx_msg_count, sizeof(peer->tx_msg_count));
+
+	peer->current_psbt = tal_dup(NULL, struct wally_psbt, ictx.current_psbt);
+
+	/* Return the current PSBT to the channel_control to give to user.
+	 */
+
+	tal_steal(NULL, ictx.current_psbt);
+	tal_steal(NULL, ictx.desired_psbt);
+
+	outmsg = towire_channeld_splice_confirmed_init(tmpctx,
+						       ictx.current_psbt);
+	wire_sync_write(MASTER_FD, take(outmsg));
+}
+
+static void handle_splice_update(struct peer *peer, const u8 *inmsg)
+{
+	/* User commands to build, fund, sign, and finish the PSBT:
+
+cd Development/lightningTwo
+source contrib/startup_regtest.sh
+start_ln
+fund_ln
+sleep 10
+PEER_ID=`l1-cli listpeers | jq -r .peers[0].id`
+PSBT=`l1-cli splice_init $PEER_ID | jq -r .psbt`
+PSBT_FUNDS=`l1-cli fundpsbt 100000sat slow 166 | jq -r .psbt`
+PSBT=`bt-cli joinpsbts "[\"$PSBT\", \"$PSBT_FUNDS\"]"`
+PSBT=`l1-cli signpsbt -k psbt="$PSBT" | jq -r .signed_psbt`
+l1-cli splice_update $PEER_ID $PSBT
+
+
+	attach debugger to channeld 1, 2:
+
+lldb -p `ps -A | grep [/]lightning_channeld | awk '{print $1;}' | head -1 | tail -1` --one-line c
+
+
+lldb -p `ps -A | grep [/]lightning_channeld | awk '{print $1;}' | head -2 | tail -1` --one-line c
+
+	attach debugger to channeld 2:
+
+	reset:
+
+stop_ln
+rm -rf /tmp/l1-regtest/ /tmp/l2-regtest/ && rm -rf "$PATH_TO_BITCOIN"
+
+	** TASK FOR TOMORROW **
+
+	process_interactivetx_updates & send_next
+	> Are now done in restart mode with the pause flag
+	> Are now handling a PSBT with an additional input added in
+	> Haven't been test for this
+	> Probably some issue
+
+	SO, therefore:
+	> Do the funded psbt instructions above
+	> breakpoint on process_interactivetx_updates and / or send_next
+	> Step through them inside of handle_splice_update
+	> Audit and see what the problemo appears to be.
+
+	CONCLUSION:
+	When sending the funding input we got from the user, because of our
+	prevtx trick inside send_next(), the psbt_changeset doesn't recognize
+	that we actually already sent the input
+
+	So it sends it twice, thrice, forever laura!!!
+
+	We should zoom out, and probably get TX_ADD_INPUT prevtx field actually
+	correctly filled
+
+
+	(reverse-i-search)`signps': l1-cli signpsbt -k psbt="cHNidP8BAIcCAAAAAhIhd9OFXbTte1RzO5vIWtXf+pVygVsP6RgSVr0f9fB7AAAAAAAAAAAAEiF304VdtO17VHM7m8ha1d/6lXKBWw/pGBJWvR/18HsBAAAAAP3///8BAAAAAAAAAAAiACDQdxOwFsYEYYcCIdWQ2f1OKF9JNC7bf3bbsKJxtvVTQQAAAAAAAQErQEIPAAAAAAAiACDQdxOwFsYEYYcCIdWQ2f1OKF9JNC7bf3bbsKJxtvVTQQEER1IhAj7/mmQe2p0m87nQM6CpqqnEgmiosyhoPR4T/8GWaXsyIQPVtN0Gisy/o+ZVA4Vs+3bHNj1jLWom3sN1MVi7JGBc/VKuDPwJbGlnaHRuaW5nAQj7Gy6F2LBlgAABAH0CAAAAAQnpB/ph1XpQR0tRBHn+OYNfd6IAxLxc4AjS5jRI4ZkZAQAAAAD9////AkBCDwAAAAAAIgAg0HcTsBbGBGGHAiHVkNn9TihfSTQu239227Cicbb1U0EmpWdIFwAAABYAFMBnr67tprSnic8WWT4DTRS3E7bVlgAAAAEBHyalZ0gXAAAAFgAUwGevru2mtKeJzxZZPgNNFLcTttUADPwJbGlnaHRuaW5nAQi4SLdliNzG3gA="
+
+	*/
+
+	u8 *outmsg;
+	struct interactivetx_context ictx;
+	// u32 sequence = 0;
+
+	ictx.ctx = peer;
+	ictx.our_role = TX_INITIATOR;
+	ictx.pps = peer->pps;
+	ictx.channel_id = peer->channel_id;
+	ictx.next_update = next_splice_step;
+	ictx.pause_when_complete = true;
+
+	// Should already have a current_psbt from a previously initiated one
+	assert(peer->current_psbt);
+
+	ictx.current_psbt = tal_dup(NULL, struct wally_psbt, peer->current_psbt);
+
+	memcpy(ictx.tx_msg_count, peer->tx_msg_count, sizeof(peer->tx_msg_count));
+
+	if(!fromwire_channeld_splice_update(tmpctx, inmsg, &ictx.desired_psbt))
+		peer_failed_warn(peer->pps, &peer->channel_id,
+			    "Invalid splice update message: %s",
+			    tal_hex(tmpctx, inmsg));
+
+	tal_steal(NULL, ictx.desired_psbt);
+
+	// User may not have setup serial numbers on their modifeid PSBT
+	psbt_add_serials(ictx.desired_psbt, ictx.our_role);
+	psbt_sort_by_serial_id(ictx.desired_psbt);
+
+	// psbt_add_serials(ictx.current_psbt, ictx.our_role);
+	// psbt_sort_by_serial_id(ictx.current_psbt);
+
+	char *error = process_interactivetx_updates(&ictx, &peer->received_tx_complete);
+
+	if(error)
+		peer_failed_warn(peer->pps, &peer->channel_id,
+				"Splice update error: %s", error);
+
+	psbt_add_serials(ictx.current_psbt, ictx.our_role);
+	psbt_sort_by_serial_id(ictx.current_psbt);
+	tal_steal(NULL, ictx.current_psbt);
+
+	memcpy(peer->tx_msg_count, ictx.tx_msg_count, sizeof(peer->tx_msg_count));
+
+	peer->current_psbt = tal_dup(NULL, struct wally_psbt, ictx.current_psbt);
+
+	/* Return the current PSBT to the channel_control to give to user.
+	 */
+
+	//D TODO: Figure out why we need to leak ictx.current_psbt...
+	tal_steal(NULL, ictx.current_psbt);
+
+	outmsg = towire_channeld_splice_confirmed_update(tmpctx,
+							 ictx.current_psbt,
+							 peer->received_tx_complete);
+	wire_sync_write(MASTER_FD, take(outmsg));
+}
+
+static void handle_splice_finalize(struct peer *peer, const u8 *inmsg)
+{
+	DLOG("handle_splice_finalize.1");
+
+	u8 *outmsg;
+	struct interactivetx_context ictx;
+	// u32 sequence = 0;
+
+	ictx.ctx = peer;
+	ictx.our_role = TX_INITIATOR;
+	ictx.pps = peer->pps;
+	ictx.channel_id = peer->channel_id;
+	ictx.next_update = next_splice_step;
+	ictx.pause_when_complete = false;
+
+	ictx.current_psbt = tal_dup(NULL, struct wally_psbt, peer->current_psbt);
+	ictx.desired_psbt = ictx.desired_psbt;
+
+	memcpy(ictx.tx_msg_count, peer->tx_msg_count, sizeof(peer->tx_msg_count));
+
+	DLOG("handle_splice_finalize.2");
+
+	if(!fromwire_channeld_splice_finalize(inmsg))
+		peer_failed_warn(peer->pps, &peer->channel_id,
+				 "Invalid splice finalized message: %s",
+				 tal_hex(tmpctx, inmsg));
+
+	psbt_add_serials(ictx.current_psbt, ictx.our_role);
+	psbt_sort_by_serial_id(ictx.current_psbt);
+
+	// psbt_add_serials(ictx.desired_psbt, ictx.our_role);
+	// psbt_sort_by_serial_id(ictx.desired_psbt);
+
+	DLOG("handle_splice_finalize.3");
+
+	char *error = process_interactivetx_updates(&ictx, &peer->received_tx_complete);
+
+	DLOG("handle_splice_finalize.4");
+
+	if(error)
+		peer_failed_warn(peer->pps, &peer->channel_id,
+				 "Splice finalize error: %s", error);
+
+	// TODO: Move the lines below into process_interactivetx_updates and tal_steal
+	// into a more usable context (ie. new paramter to process_interactivetx_updates)
+	psbt_add_serials(ictx.current_psbt, ictx.our_role);
+	psbt_sort_by_serial_id(ictx.current_psbt);
+	tal_steal(NULL, ictx.current_psbt);
+
+	DLOG("splice screen turn on");
 
 	//TODO: Calculate feerate correctly
 
 	// u32 ourFeerate = channel_feerate(peer->channel, LOCAL);
-	u32 theirFeerate = channel_feerate(peer->channel, REMOTE);
+	// u32 theirFeerate = channel_feerate(peer->channel, REMOTE);
 
-	struct wally_tx_output *newChanOutpoint = &ictx.current_psbt->tx->outputs[0];
+	int chan_output_index = 0;
 
-	newChanOutpoint->satoshi = peer->channel->funding_sats.satoshis - 500;
+	struct wally_tx_output *newChanOutpoint = &ictx.current_psbt->tx->outputs[chan_output_index];
+
+	u64 total_in = 0;
+	u64 change_out = 0;
+
+	for(int i = 0; i < ictx.current_psbt->tx->num_inputs; i++) {
+
+		u64 amount = psbt_input_get_amount(ictx.current_psbt, i).satoshis;
+
+		if(!amount)
+			peer_failed_warn(peer->pps, &peer->channel_id,
+					 "Input %d of splice does not have an input amount",
+					 i);
+
+		total_in += amount;
+	}
+
+	/* i = 1 to skip the first output (which is our new channel output!) */
+
+	for(int i = 1; i < ictx.current_psbt->tx->num_outputs; i++)
+		change_out += psbt_output_get_amount(ictx.current_psbt, i).satoshis;
+
+	u64 miner_fee = 1000;
+
+	newChanOutpoint->satoshi = total_in - change_out - miner_fee;
 
 	//TODO: Do a bunch of checks
 	// * feerate is right
@@ -2623,15 +2984,51 @@ static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 	// * copy checks from dualfunding
 	// * if you have a check that isnt in the spec you should add it to spec
 
-	tal_wally_start();
+	// tal_wally_start();
 
 	psbt_elements_normalize_fees(ictx.current_psbt);
 
-	tal_wally_end(tal_steal(tmpctx, ictx.current_psbt));
+	psbt_finalize(ictx.current_psbt);
+
+	peer->current_psbt = tal_dup(NULL, struct wally_psbt, ictx.current_psbt);
+
+	DLOG("handle_splice_finalize sending complete");
+
+	outmsg = towire_channeld_splice_confirmed_finalize(tmpctx,
+							   peer->current_psbt);
+	wire_sync_write(MASTER_FD, take(outmsg));
+
+	DLOG("handle_splice_finalize.finished");
+}
+
+static void handle_splice_signed(struct peer *peer, const u8 *inmsg)
+{
+	DLOG("handle_splice_signed.1");
+
+	const u8 *redeemscript;
+	const u8 *msg;
+	enum peer_wire type;
+	u8 *outmsg;
+
+	if(!fromwire_channeld_splice_signed(NULL, inmsg, &peer->current_psbt))
+		peer_failed_warn(peer->pps, &peer->channel_id,
+				 "Invalid splice signed message: %s",
+				 tal_hex(tmpctx, inmsg));
+
+	u32 theirFeerate = channel_feerate(peer->channel, REMOTE);
+
+	redeemscript = bitcoin_redeem_2of2(NULL,
+					   &peer->channel->funding_pubkey[0],
+					   &peer->channel->funding_pubkey[1]);
+	
+	int chan_output_index = 0;
+
+	struct wally_tx_output *newChanOutpoint =
+		&peer->current_psbt->tx->outputs[chan_output_index];
 
 	struct bitcoin_outpoint outpoint;
 
-	psbt_txid(tmpctx, ictx.current_psbt, &outpoint.txid, NULL);
+	psbt_txid(NULL, peer->current_psbt, &outpoint.txid, NULL);
 
 	outpoint.n = 0; 
 	/* Todo find output index using redeem script & validate there
@@ -2649,19 +3046,59 @@ static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 						     theirFeerate,
 						     funding_sats,
 						     our_funding_sats, /* <- todo */
-						     ictx.current_psbt));
+						     peer->current_psbt));
 
-	peer->resend_all_commitments = true;
+	// peer->resend_all_commitments = true;
 
-	send_commit(peer);
+	// send_commit(peer);
+
+	DLOG("handle_splice_signed.4.1");
 
 	struct bitcoin_tx *bitcoin_tx;
 	struct bitcoin_signature splice_sig;
 
-	bitcoin_tx = bitcoin_tx_with_psbt(tmpctx, ictx.current_psbt);
+	DLOG("handle_splice_signed.4.2");
+
+	bitcoin_tx = bitcoin_tx_with_psbt(tmpctx, peer->current_psbt);
+
+	DLOG("handle_splice_signed.4.3");
+
+	char buf[2048];
+
+	snprintf(buf, 2048, "Active splice peer tx be4 signing: %s",
+		tal_hex(tmpctx, linearize_tx(tmpctx, bitcoin_tx)));
+
+	DLOG(buf);
+
+	int splice_funding_index = -1;
+
+	for(int i = 0; i < peer->current_psbt->num_inputs; i++) {
+
+		struct wally_psbt_input *in =
+			&peer->current_psbt->inputs[i];
+
+		if(in->witness_script_len != tal_bytelen(redeemscript))
+			continue;
+
+		if(0 != memcmp(in->witness_script,
+			       redeemscript, 
+			       in->witness_script_len)) {
+
+			continue;
+		}
+
+		splice_funding_index = i;
+	}
+
+	if(splice_funding_index == -1)
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "Unable to find splice funding tx");
 
 	msg = towire_hsmd_sign_splice_tx(tmpctx, bitcoin_tx,
-					 &peer->channel->funding_pubkey[REMOTE]);
+					 &peer->channel->funding_pubkey[REMOTE],
+					 splice_funding_index);
+
+	DLOG("handle_splice_signed.5");
 
 	msg = hsm_req(tmpctx, take(msg));
 	if (!fromwire_hsmd_sign_tx_reply(msg, &splice_sig))
@@ -2680,13 +3117,15 @@ static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 	dump_htlcs(peer->channel, "Sending splice commit_sig!");
 
 	/* Set the splice_sig on the splice funding tx psbt */
-	if (!psbt_input_set_signature(ictx.current_psbt, 0,
+	if (!psbt_input_set_signature(peer->current_psbt, splice_funding_index,
 				      &peer->channel->funding_pubkey[LOCAL],
 				      &splice_sig))
 		status_failed(STATUS_FAIL_INTERNAL_ERROR,
 			      "Unable to set signature internally");
 
-	psbt_finalize(ictx.current_psbt);
+	DLOG("handle_splice_signed.6");
+
+	psbt_finalize(peer->current_psbt);
 
 	struct witness_stack **ws = tal_arr(tmpctx, struct witness_stack *, 1);
 
@@ -2714,33 +3153,35 @@ static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 
 	/* Now we wait for responding tx_signatures msg */
 
-	msg = peer_read(tmpctx, peer->pps);
+	// msg = peer_read(tmpctx, peer->pps);
 
-	enum peer_wire type = fromwire_peektype(msg);
+	// type = fromwire_peektype(msg);
 
-	if (handle_peer_error(peer->pps, &peer->channel_id, msg))
-		return;
+	// if (handle_peer_error(peer->pps, &peer->channel_id, msg))
+	// 	return;
 
-	if(type != WIRE_COMMITMENT_SIGNED)
-		peer_failed_warn(peer->pps, &peer->channel_id,
-				"Splicing got incorrect message from peer: %d "
-				"(should be WIRE_COMMITMENT_SIGNED)", type);
+	// if(type != WIRE_COMMITMENT_SIGNED)
+	// 	peer_failed_warn(peer->pps, &peer->channel_id,
+	// 			"Splicing got incorrect message from peer: %d "
+	// 			"(should be WIRE_COMMITMENT_SIGNED)", type);
 
-	handle_peer_commit_sig(peer, msg);
+	// handle_peer_commit_sig(peer, msg);
 
-	msg = peer_read(tmpctx, peer->pps);
+	// DLOG("handle_splice_signed.7");
 
-	type = fromwire_peektype(msg);
+	// msg = peer_read(tmpctx, peer->pps);
 
-	if (handle_peer_error(peer->pps, &peer->channel_id, msg))
-		return;
+	// type = fromwire_peektype(msg);
 
-	if(type != WIRE_REVOKE_AND_ACK)
-		peer_failed_warn(peer->pps, &peer->channel_id,
-				"Splicing got incorrect message from peer: %d "
-				"(should be WIRE_REVOKE_AND_ACK)", type);
+	// if (handle_peer_error(peer->pps, &peer->channel_id, msg))
+	// 	return;
 
-	handle_peer_revoke_and_ack(peer, msg);
+	// if(type != WIRE_REVOKE_AND_ACK)
+	// 	peer_failed_warn(peer->pps, &peer->channel_id,
+	// 			"Splicing got incorrect message from peer: %d "
+	// 			"(should be WIRE_REVOKE_AND_ACK)", type);
+
+	// handle_peer_revoke_and_ack(peer, msg);
 
 	msg = peer_read(tmpctx, peer->pps);
 
@@ -2763,57 +3204,117 @@ static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 			    "Splicing bad tx_signatures %s",
 			    tal_hex(msg, msg));
 
-	struct bitcoin_signature their_sig;
+	int final_sigs_cnt = 0;
 
-	their_sig.sighash_type = SIGHASH_ALL;
+	// We only support one signature in the stack for now.
+	assert(tal_count(ws) == 1);
 
-	if(!signature_from_der(ws[0]->witness_element[0]->witness,
-			       tal_count(ws[0]->witness_element[0]->witness),
-			       &their_sig)) {
+	for(int i = 0; i < tal_count(ws); i++) {
 
-		peer_failed_warn(peer->pps, &peer->channel_id,
-				 "Splicing bad tx_signatures %s",
-				 tal_hex(msg, msg));
+		// struct wally_psbt_input *in =
+		// 	&peer->current_psbt->inputs[i];
+
+		/* For now we only accept signature for the original channel tx
+		 * and not for peer splice ins
+		 */
+
+		struct bitcoin_signature their_sig;
+
+		their_sig.sighash_type = SIGHASH_ALL;
+
+		if(!signature_from_der(ws[i]->witness_element[0]->witness,
+				       tal_count(ws[i]->witness_element[0]->witness),
+				       &their_sig)) {
+
+			peer_failed_warn(peer->pps, &peer->channel_id,
+					 "Splicing bad tx_signatures %s",
+					 tal_hex(msg, msg));
+		}
+
+		struct pubkey *their_pubkey = &peer->channel->funding_pubkey[REMOTE];
+
+		/* Set the commit_sig on the commitment tx psbt */
+		if (!psbt_input_set_signature(peer->current_psbt, splice_funding_index,
+					      their_pubkey,
+					      &their_sig)) {
+
+			status_failed(STATUS_FAIL_INTERNAL_ERROR,
+				      "Unable to set signature internally");
+		}
+
+		psbt_input_set_witscript(peer->current_psbt, splice_funding_index, redeemscript);
+
+		final_sigs_cnt =
+			psbt_finalize_multisig_signatures(tmpctx,
+							  &peer->current_psbt->inputs[splice_funding_index]);
 	}
 
-	struct pubkey *their_pubkey = &peer->channel->funding_pubkey[REMOTE];
+	// int other_index = splice_funding_index ? 0 : 1;
 
-	/* Set the commit_sig on the commitment tx psbt */
-	if (!psbt_input_set_signature(ictx.current_psbt, 0,
-				      their_pubkey,
-				      &their_sig)) {
+	// struct wally_psbt_input *in = &peer->current_psbt->inputs[other_index];
 
-		status_failed(STATUS_FAIL_INTERNAL_ERROR,
-			      "Unable to set signature internally");
-	}
+	// tal_wally_start();
 
-	psbt_input_set_witscript(ictx.current_psbt, 0, redeemscript);
+	// wally_tx_witness_stack_init_alloc(2, &in->final_witness);
 
-	int final_sigs_cnt =
-		psbt_finalize_multisig_signatures(tmpctx,
-						  &ictx.current_psbt->inputs[0]);
+	// struct wally_map_item *item = &in->signatures.items[0];
 
-	if(!psbt_finalize(ictx.current_psbt))
+	// wally_tx_witness_stack_add(in->final_witness,
+	// 			   item->value,
+	// 			   item->value_len);
+
+	// wally_tx_witness_stack_add(in->final_witness,
+	// 			   item->key,
+	// 			   item->key_len);
+
+	// tal_wally_end(NULL);
+
+	// const struct witness_stack **all_ws;
+
+	// all_ws = psbt_to_witness_stacks(tmpctx,
+	// 				 peer->current_psbt,
+	// 				 TX_INITIATOR);
+
+	// const struct witness_element **elem;
+
+
+	// elem = cast_const2(const struct witness_element **,
+	// 		   all_ws[other_index]->witness_element);
+
+	// psbt_finalize_input(tmpctx,
+	// 		    &peer->current_psbt->inputs[other_index],
+	// 		    elem);
+
+	if(!psbt_finalize(peer->current_psbt))
 		status_failed(STATUS_FAIL_INTERNAL_ERROR,
 			      "Splice psbt_finalize failed");
 
-	struct bitcoin_tx *final_tx = bitcoin_tx_with_psbt(tmpctx, ictx.current_psbt);
+	struct bitcoin_tx *final_tx = bitcoin_tx_with_psbt(tmpctx, peer->current_psbt);
 
 	status_debug("final_sigs_cnt: %d", final_sigs_cnt);
 
-	status_debug("Splice ack finished? with psbt: %s", psbt_to_b64(tmpctx, ictx.current_psbt));
+	status_debug("Splice ack finished? with psbt: %s", psbt_to_b64(tmpctx, peer->current_psbt));
 
 	u8* ptr = linearize_tx(tmpctx, final_tx);
 
-	status_debug("Splice ack tx hex: %s", tal_hex(tmpctx, ptr));
+	DLOG("Splice ack tx hex:");
+	DLOG(tal_hex(tmpctx, ptr));
+
+	// broadcast_tx or broadcast_tx_ahf in chaintopology.h
+
+	DLOG("handle_splice_signed.99");
+
+	tal_steal(NULL, peer->current_psbt);
+
+	outmsg = towire_channeld_splice_confirmed_signed(tmpctx, final_tx);
+	wire_sync_write(MASTER_FD, take(outmsg));
+
+	DLOG("handle_splice_signed.finished");
 }
 
 static void handle_splice_stfu_success(struct peer *peer)
 {
 	u8 *msg;
-
-	msg = towire_channeld_splice_confirmed_init(NULL);
-	wire_sync_write(MASTER_FD, take(msg));
 
 	msg = towire_splice(tmpctx,
 			    &chainparams->genesis_blockhash,
@@ -4325,10 +4826,6 @@ static void req_in(struct peer *peer, const u8 *msg)
 	enum channeld_wire t = fromwire_peektype(msg);
 
 	switch (t) {
-	case WIRE_CHANNELD_SPLICE_INIT:
-	case WIRE_CHANNELD_SPLICE_CONFIRMED_INIT:
-		handle_splice_init(peer, msg);
-		return;
 	case WIRE_CHANNELD_FUNDING_DEPTH:
 		handle_funding_depth(peer, msg);
 		return;
@@ -4382,6 +4879,25 @@ static void req_in(struct peer *peer, const u8 *msg)
 #if EXPERIMENTAL_FEATURES
 		handle_dev_quiesce(peer, msg);
 		return;
+	case WIRE_CHANNELD_SPLICE_INIT:
+		handle_splice_init(peer, msg);
+		return;
+	case WIRE_CHANNELD_SPLICE_UPDATE:
+		handle_splice_update(peer, msg);
+		return;
+	case WIRE_CHANNELD_SPLICE_FINALIZE:
+		handle_splice_finalize(peer, msg);
+		return;
+	case WIRE_CHANNELD_SPLICE_SIGNED:
+		handle_splice_signed(peer, msg);
+		return;
+	case WIRE_CHANNELD_SPLICE_CONFIRMED_INIT:
+	case WIRE_CHANNELD_SPLICE_CONFIRMED_SIGNED:
+	case WIRE_CHANNELD_SPLICE_CONFIRMED_UPDATE:
+	case WIRE_CHANNELD_SPLICE_LOOKUP_TX:
+	case WIRE_CHANNELD_SPLICE_LOOKUP_TX_RESULT:
+	case WIRE_CHANNELD_SPLICE_CONFIRMED_FINALIZE:
+		break;
 #endif /* EXPERIMENTAL_FEATURES */
 #else
 	case WIRE_CHANNELD_DEV_REENABLE_COMMIT:
