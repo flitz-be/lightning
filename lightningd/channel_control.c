@@ -677,11 +677,21 @@ static void peer_got_channel_ready(struct channel *channel, const u8 *msg)
 	if (channel->alias[REMOTE] == NULL)
 		channel->alias[REMOTE] = tal_steal(channel, alias_remote);
 
-	if (channel->scid)
+	/* >>> master */
+
+	/* Remember that we got the lockin */
+	wallet_channel_save(channel->peer->ld->wallet, channel);
+
+	if (channel->depth >= channel->minimum_depth)
 		lockin_complete(channel, CHANNELD_AWAITING_LOCKIN);
-	else
-		/* Remember that we got the lockin */
-		wallet_channel_save(channel->peer->ld->wallet, channel);
+
+	/* ==== local */
+
+	// if (channel->scid)
+	// 	lockin_complete(channel, CHANNELD_AWAITING_LOCKIN);
+	// else
+	// 	/* Remember that we got the lockin */
+	// 	wallet_channel_save(channel->peer->ld->wallet, channel);
 }
 
 static void peer_got_announcement(struct channel *channel, const u8 *msg)
