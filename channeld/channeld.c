@@ -663,6 +663,22 @@ static void handle_peer_splice_locked(struct peer *peer, const u8 *msg)
 		peer_failed_warn(peer->pps, &peer->channel_id,
 				 "Bad splice_locked %s", tal_hex(msg, msg));
 
+	if (!channel_id_eq(&chanid, &peer->channel_id))
+		peer_failed_err(peer->pps, &chanid,
+				"Wrong channel id in %s (expected %s)",
+				tal_hex(tmpctx, msg),
+				type_to_string(msg, struct channel_id,
+					       &peer->channel_id));
+
+	// peer->channel->funding_sats.satoshis = 990000000;
+	// peer->channel->funding.txid = txid;
+	// peer->channel->funding.n = 0; // TODO <- get dynamic output index
+	// peer->channel->config[LOCAL].channel_reserve.satoshis = 10000;
+	// peer->channel->config[REMOTE].channel_reserve.satoshis = 10000;
+	// peer->channel->config[n].set_all_the_things = 0;
+	// peer->channel->view[LOCAL].owed.satoshis = 0; // TODO
+	// peer->channel->view[REMOTE].owed.satoshis = 0; // TODO
+
 	// TODO: check that the new channel id is in our inflights?
 
 	// if (!channel_id_eq(&chanid, &peer->channel_id))
@@ -678,7 +694,7 @@ static void handle_peer_splice_locked(struct peer *peer, const u8 *msg)
 	 * On confirm create a new channel entry -> add all HTLC stuff there
 	 * maybe add HTLC to htlc database but they point to inflight instead
 	 * -> mark the old channel db object as closed (gets deleted at 100)
-	 * 
+	 * 3) Set the amount_sats and out_amount_sats to correct values
 	*/
 
 	// TODO: Invent a place to put HTLCs for pending splice tx
@@ -694,9 +710,7 @@ static void handle_peer_splice_locked(struct peer *peer, const u8 *msg)
 	channel_announcement_negotiate(peer);
 	billboard_update(peer);
 
-	notleak(new_reltimer(&peer->timers, peer,
-			     time_from_sec(5),
-			     send_channel_initial_update, peer));
+	send_channel_update(peer, 0);
 }
 
 static void handle_peer_channel_ready(struct peer *peer, const u8 *msg)
@@ -2746,7 +2760,7 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 	struct amount_sat funding_sats, our_funding_sats;
 
 	funding_sats.satoshis = newChanOutpoint->satoshi;
-	our_funding_sats.satoshis = 0;
+	our_funding_sats.satoshis = funding_sats.satoshis;
 
 	struct bitcoin_outpoint outpoint;
 
@@ -3327,7 +3341,7 @@ static void handle_splice_signed(struct peer *peer, const u8 *inmsg)
 	struct amount_sat funding_sats, our_funding_sats;
 
 	funding_sats.satoshis = newChanOutpoint->satoshi;
-	our_funding_sats.satoshis = 0; /* <- todo */
+	our_funding_sats.satoshis = funding_sats.satoshis;
 
 	char buf[2048];
 

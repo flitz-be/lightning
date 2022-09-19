@@ -1,0 +1,85 @@
+CREATE TABLE channel_htlcs
+(
+    id INTEGER,
+    channel_id INTEGER REFERENCES channels(id) ON DELETE CASCADE,
+    channel_htlc_id INTEGER,
+    direction INTEGER,
+    origin_htlc INTEGER,
+    msatoshi INTEGER,
+    cltv_expiry INTEGER,
+    payment_hash BLOB,
+    payment_key BLOB,
+    routing_onion BLOB,
+    failuremsg BLOB,
+    malformed_onion INTEGER,
+    hstate INTEGER,
+    shared_secret BLOB,
+    received_time INTEGER,
+    partid INTEGER,
+    localfailmsg BLOB,
+    we_filled INTEGER,
+    groupid INTEGER,
+    min_commit_num INTEGER default 0,
+    max_commit_num INTEGER default NULL,
+    fail_immediate INTEGER DEFAULT 0,
+    fees_msat INTEGER DEFAULT 0,
+    PRIMARY KEY (id),
+    UNIQUE (channel_id, channel_htlc_id, direction)
+);
+
+== after funding locked ==
+* new channel record with new channel dbid
+* every htlc sig with that channel dbid & funding_tx id, update channel dbid to new
+** (don't touch the old ones they'll get cleaned up when channel record gets deleted (cascade))
+* update htlcs with id >= starting_htlc_id to new channel dbid
+* old channel record will get cleaned later
+* inflights will get cleaned later (cause channel dbid change)
+
+ALTER TABLE htlc_sigs ADD inflight_id BLOB REFERENCES channel_funding_inflights(funding_tx_id);
+ALTER TABLE channel_funding_inflights ADD starting_htlc_id INTEGER DEFAULT 0
+
+
+CREATE TABLE htlc_sigs
+(
+    channelid INTEGER REFERENCES channels(id) ON DELETE CASCADE,
+    funding_tx_id BLOB REFERENCES channel_funding_inflights(funding_tx_id),
+    signature BLOB,
+    PRIMARY KEY (channelid, funding_tx_id)
+);
+
+CREATE TABLE channel_funding_inflights (
+    channel_id INTEGER REFERENCES channels(id) ON DELETE CASCADE,
+    funding_tx_id BLOB,
+    starting_htlc_id INTEGER DEFAULT 0, <-- an idea
+    funding_tx_outnum INTEGER,
+    funding_feerate INTEGER,
+    funding_satoshi INTEGER,
+    our_funding_satoshi INTEGER,
+    funding_psbt BLOB,
+    last_tx BLOB,
+    last_sig BLOB,
+    funding_tx_remote_sigs_received INTEGER,
+    lease_commit_sig BLOB DEFAULT NULL,
+    lease_chan_max_msat INTEGER DEFAULT NULL,
+    lease_chan_max_ppt INTEGER DEFAULT NULL,
+    lease_expiry INTEGER DEFAULT 0,
+    lease_blockheight_start INTEGER DEFAULT 0,
+    lease_fee INTEGER DEFAULT 0,
+PRIMARY KEY (channel_id, funding_tx_id));
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+CREATE TABLE channels (  id INTEGER,  peer_id INTEGER REFERENCES peers(id) ON DELETE CASCADE,  short_channel_id TEXT,  channel_config_local INTEGER,  channel_config_remote INTEGER,  state INTEGER,  funder INTEGER,  channel_flags INTEGER,  minimum_depth INTEGER,  next_index_local INTEGER,  next_index_remote INTEGER,  next_htlc_id INTEGER,  funding_tx_id BLOB,  funding_tx_outnum INTEGER,  funding_satoshi INTEGER,  funding_locked_remote INTEGER,  push_msatoshi INTEGER,  msatoshi_local INTEGER,  fundingkey_remote BLOB,  revocation_basepoint_remote BLOB,  payment_basepoint_remote BLOB,  htlc_basepoint_remote BLOB,  delayed_payment_basepoint_remote BLOB,  per_commit_remote BLOB,  old_per_commit_remote BLOB,  local_feerate_per_kw INTEGER,  remote_feerate_per_kw INTEGER,  shachain_remote_id INTEGER,  shutdown_scriptpubkey_remote BLOB,  shutdown_keyidx_local INTEGER,  last_sent_commit_state INTEGER,  last_sent_commit_id INTEGER,  last_tx BLOB,  last_sig BLOB,  closing_fee_received INTEGER,  closing_sig_received BLOB, first_blocknum INTEGER, last_was_revoke INTEGER, in_payments_offered INTEGER DEFAULT 0, in_payments_fulfilled INTEGER DEFAULT 0, in_msatoshi_offered INTEGER DEFAULT 0, in_msatoshi_fulfilled INTEGER DEFAULT 0, out_payments_offered INTEGER DEFAULT 0, out_payments_fulfilled INTEGER DEFAULT 0, out_msatoshi_offered INTEGER DEFAULT 0, out_msatoshi_fulfilled INTEGER DEFAULT 0, min_possible_feerate INTEGER, max_possible_feerate INTEGER, msatoshi_to_us_min INTEGER, msatoshi_to_us_max INTEGER, future_per_commitment_point BLOB, last_sent_commit BLOB, feerate_base INTEGER, feerate_ppm INTEGER, remote_upfront_shutdown_script BLOB, remote_ann_node_sig BLOB, remote_ann_bitcoin_sig BLOB, option_static_remotekey INTEGER DEFAULT 0, shutdown_scriptpubkey_local BLOB, our_funding_satoshi INTEGER DEFAULT 0, option_anchor_outputs INTEGER DEFAULT 0, full_channel_id BLOB DEFAULT NULL, funding_psbt BLOB DEFAULT NULL, closer INTEGER DEFAULT 2, state_change_reason INTEGER DEFAULT 0, funding_tx_remote_sigs_received INTEGER DEFAULT 0, revocation_basepoint_local BLOB, payment_basepoint_local BLOB, htlc_basepoint_local BLOB, delayed_payment_basepoint_local BLOB, funding_pubkey_local BLOB, shutdown_wrong_txid BLOB DEFAULT NULL, shutdown_wrong_outnum INTEGER DEFAULT NULL, local_static_remotekey_start INTEGER DEFAULT 0, remote_static_remotekey_start INTEGER DEFAULT 0, lease_commit_sig BLOB DEFAULT NULL, lease_chan_max_msat INTEGER DEFAULT NULL, lease_chan_max_ppt INTEGER DEFAULT NULL, lease_expiry INTEGER DEFAULT 0,  PRIMARY KEY (id));
