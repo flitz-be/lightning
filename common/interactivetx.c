@@ -129,7 +129,7 @@ static u8 *read_next_msg(const tal_t *ctx,
 		case WIRE_TX_COMPLETE:
 			return msg;
 		case WIRE_TX_SIGNATURES:
-		case WIRE_FUNDING_LOCKED:
+		case WIRE_CHANNEL_READY:
 		case WIRE_INIT_RBF:
 		case WIRE_OPEN_CHANNEL2:
 		case WIRE_INIT:
@@ -637,7 +637,7 @@ char *process_interactivetx_updates(const tal_t *ctx,
 		case WIRE_ACCEPT_CHANNEL:
 		case WIRE_FUNDING_CREATED:
 		case WIRE_FUNDING_SIGNED:
-		case WIRE_FUNDING_LOCKED:
+		case WIRE_CHANNEL_READY:
 		case WIRE_SHUTDOWN:
 		case WIRE_CLOSING_SIGNED:
 		case WIRE_UPDATE_ADD_HTLC:

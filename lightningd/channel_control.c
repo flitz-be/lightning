@@ -364,8 +364,10 @@ static void send_splice_tx(struct channel *channel,
 	info->output_index = output_index;
 
 	bitcoind_sendrawtx(ld->topology->bitcoind,
-		   tal_hex(tmpctx, tx_bytes),
-		   send_splice_tx_done, info);
+			   cc->cmd->id,
+			   tal_hex(tmpctx, tx_bytes),
+			   false, // DTODO <- do we want to allowhighfees here?
+			   send_splice_tx_done, info);
 }
 
 static void handle_splice_confirmed_signed(struct lightningd *ld,
