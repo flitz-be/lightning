@@ -364,7 +364,7 @@ static void send_splice_tx(struct channel *channel,
 	info->output_index = output_index;
 
 	bitcoind_sendrawtx(ld->topology->bitcoind,
-			   cc->cmd->id,
+			   cc ? cc->cmd->id : NULL,
 			   tal_hex(tmpctx, tx_bytes),
 			   false, // DTODO <- do we want to allowhighfees here?
 			   send_splice_tx_done, info);
