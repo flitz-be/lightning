@@ -2874,8 +2874,8 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 	struct pubkey splice_remote_pubkey;
 
 	if (!fromwire_splice(inmsg,
-			     &genesis_blockhash,
 			     &channel_id,
+			     &genesis_blockhash,
 			     &funding_feerate_perkw,
 			     &splice_remote_pubkey))
 		peer_failed_warn(peer->pps, &peer->channel_id,
@@ -2896,8 +2896,8 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 				 "Splice doesnt support changing pubkeys");
 
 	msg = towire_splice_ack(tmpctx,
-				&chainparams->genesis_blockhash,
 				&peer->channel_id,
+				&chainparams->genesis_blockhash,
 				&peer->channel->funding_pubkey[LOCAL]);
 
 	peer_write(peer->pps, take(msg));
@@ -3281,9 +3281,9 @@ static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 	struct pubkey splice_remote_pubkey;
 
 	if (!fromwire_splice_ack(inmsg,
-			     &genesis_blockhash,
-			     &channel_id,
-			     &splice_remote_pubkey))
+				 &channel_id,
+				 &genesis_blockhash,
+				 &splice_remote_pubkey))
 		peer_failed_warn(peer->pps, &peer->channel_id,
 				 "Bad wire_splice_ack %s", tal_hex(tmpctx, inmsg));
 
@@ -3885,11 +3885,11 @@ static void handle_splice_stfu_success(struct peer *peer)
 
 	status_debug("[SPLICE] handle_splice_stfu_success channeld is %s",
 		type_to_string(tmpctx, struct channel_id,
-					       &peer->channel_id));
+			       &peer->channel_id));
 
 	msg = towire_splice(tmpctx,
-			    &chainparams->genesis_blockhash,
 			    &peer->channel_id,
+			    &chainparams->genesis_blockhash,
 			    0,
 			    &peer->channel->funding_pubkey[LOCAL]);
 	peer_write(peer->pps, take(msg));
