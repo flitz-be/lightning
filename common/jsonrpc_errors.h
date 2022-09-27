@@ -62,6 +62,9 @@ enum jsonrpc_errcode {
 	FUNDING_UNKNOWN_CHANNEL = 311,
 	FUNDING_STATE_INVALID = 312,
 
+	/* Splice errors */
+	SPLICE_BROADCAST_FAIL = 350,
+
 	/* `connect` errors */
 	CONNECT_NO_KNOWN_ADDRESS = 400,
 	CONNECT_ALL_ADDRESSES_FAILED = 401,
