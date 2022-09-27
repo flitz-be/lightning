@@ -1691,9 +1691,9 @@ static void send_commit(struct peer *peer)
 		int old_size = tal_count(cs_tlv->splice_commitsigs);
 
 		if (!old_size)
-			cs_tlv->splice_commitsigs = tal_arrz(tmpctx,
-							     struct commitsigs*,
-							     1);
+			cs_tlv->splice_commitsigs = tal_arr(tmpctx,
+							    struct commitsigs*,
+							    1);
 		else
 			tal_resize(&cs_tlv->splice_commitsigs, old_size + 1);
 
@@ -1707,13 +1707,15 @@ static void send_commit(struct peer *peer)
 		struct commitsigs *commitsigs = cs_tlv->splice_commitsigs[old_size];
 
 		commitsigs->commit_signature = splice_commit_sig.s;
+		commitsigs->htlc_signature = raw_sigs(commitsigs,
+						      splice_htlc_sigs);
 
-		commitsigs->htlc_signature = tal_arrz(tmpctx,
-						     secp256k1_ecdsa_signature,
-						     tal_count(splice_htlc_sigs));
+		// commitsigs->htlc_signature = tal_arr(tmpctx,
+		// 				     secp256k1_ecdsa_signature,
+		// 				     tal_count(splice_htlc_sigs));
 
-		for (int j = 0; j < tal_count(splice_htlc_sigs); j++)
-			commitsigs->htlc_signature[j] = splice_htlc_sigs[j].s;
+		// for (int j = 0; j < tal_count(splice_htlc_sigs); j++)
+		// 	commitsigs->htlc_signature[j] = splice_htlc_sigs[j].s;
 	}
 
 #if DEVELOPER
@@ -1725,6 +1727,8 @@ static void send_commit(struct peer *peer)
 #endif
 
 	// TODO: do we need another one of these calls for each active splice?
+	// yeah pretty sure we do.
+	// wait no i dont think we do....
 
 	status_debug("Telling master we're about to commit...");
 	/* Tell master to save this next commit to database, then wait. */
@@ -2055,6 +2059,164 @@ static void handle_peer_commit_sig(struct peer *peer, const u8 *msg)
 						&peer->channel->funding_pubkey
 						[REMOTE]),
 				 channel_feerate(peer->channel, LOCAL));
+	}
+
+	if(peer->splice_count) {
+		if(!cs_tlv)
+			peer_failed_warn(peer->pps, &peer->channel_id,
+					 "Bad commitment_signed mesage"
+					 " without a splice commit sig"
+					 " section during a splice.");
+		if(!cs_tlv->splice_commitsigs
+		   || !tal_count(cs_tlv->splice_commitsigs))
+			peer_failed_warn(peer->pps, &peer->channel_id,
+					 "Bad commitment_signed mesage"
+					 " without an empty splice commit sig"
+					 " section.");
+		if(tal_count(cs_tlv->splice_commitsigs) != peer->splice_count)
+			peer_failed_warn(peer->pps, &peer->channel_id,
+					 "Bad commitment_signed message with"
+					 " an incorrect number of splice"
+					 " commitsigs. Received %lu but should"
+					 " be %d",
+					 tal_count(cs_tlv->splice_commitsigs),
+					 peer->splice_count);
+	}
+
+	for (u32 i = 0; peer->splice_count; i++) {
+
+		u8 *msg;
+		enum channeld_wire type;
+		bool is_found;
+		struct bitcoin_outpoint outpoint;
+		u32 theirFeerate;
+		struct amount_sat funding_sats, our_funding_sats;
+		struct wally_psbt *psbt;
+		struct bitcoin_tx **splice_txs;
+		const struct htlc **splice_htlc_map;
+		struct wally_tx_output *splice_direct_outputs[NUM_SIDES];
+		struct bitcoin_signature splice_commit_sig;
+	        secp256k1_ecdsa_signature *raw_htlc_sig;
+	        struct bitcoin_signature *splice_htlc_sig;
+		const u8 *splice_funding_wscript;
+
+		wire_sync_write(MASTER_FD,
+			        take(towire_channeld_get_inflight(tmpctx,
+							          i)));
+
+		assert(!(fcntl(MASTER_FD, F_GETFL) & O_NONBLOCK));
+
+		msg = wire_sync_read(tmpctx, MASTER_FD);
+
+		type = fromwire_peektype(msg);
+
+		if (type != WIRE_CHANNELD_GOT_INFLIGHT) {
+
+			peer_failed_err(peer->pps, &peer->channel_id,
+					"Channeld got incorrect message from "
+					"lightningd: %d "
+					"(should be WIRE_CHANNELD_GOT_INFLIGHT)", type);
+
+			break;
+		}
+
+		if (!fromwire_channeld_got_inflight(tmpctx,
+						    msg,
+						    &is_found,
+						    &outpoint.txid,
+						    &outpoint.n,
+						    &theirFeerate,
+						    &funding_sats,
+						    &our_funding_sats,
+						    &psbt)) {
+
+			peer_failed_err(peer->pps,
+					&peer->channel_id,
+					"Invalid 'got_inflight' mesage from daemon");
+		}
+
+		if (!is_found)
+			break;
+
+	        splice_commit_sig.sighash_type = SIGHASH_ALL;
+
+	        memcpy(&splice_commit_sig.s,
+	               &cs_tlv->splice_commitsigs[i]->commit_signature,
+	               sizeof(splice_commit_sig.s));
+
+		raw_htlc_sig = cs_tlv->splice_commitsigs[i]->htlc_signature;
+
+		splice_htlc_sig = unraw_sigs(tmpctx, raw_htlc_sig,
+					     channel_has(peer->channel,
+					     		 OPT_ANCHOR_OUTPUTS));
+
+		char buf[2048];
+
+		sprintf(buf, "channel_splice_txs txid: %s\n", tal_hexstr(tmpctx,
+									  &outpoint.txid,
+									  sizeof(outpoint.txid)));
+
+		DLOG(buf);
+
+		splice_txs = channel_splice_txs(tmpctx, &outpoint, funding_sats,
+						&splice_htlc_map, splice_direct_outputs,
+						&splice_funding_wscript, peer->channel,
+						&peer->next_local_per_commit,
+						peer->next_index[LOCAL], LOCAL);
+
+		if (!check_tx_sig(splice_txs[0], 0, NULL, splice_funding_wscript,
+				  &peer->channel->funding_pubkey[REMOTE], &splice_commit_sig)) {
+			dump_htlcs(peer->channel, "receiving splice_commit_sig");
+			peer_failed_warn(peer->pps, &peer->channel_id,
+					 "Bad splice tlv splice_commit_sig signature %"PRIu64" %s for tx %s wscript %s key %s feerate %u",
+					 peer->next_index[LOCAL],
+					 type_to_string(msg, struct bitcoin_signature,
+							&splice_commit_sig),
+					 type_to_string(msg, struct bitcoin_tx, splice_txs[0]),
+					 tal_hex(msg, splice_funding_wscript),
+					 type_to_string(msg, struct pubkey,
+							&peer->channel->funding_pubkey
+							[REMOTE]),
+					 channel_feerate(peer->channel, LOCAL));
+		}
+
+		/* BOLT #2:
+		 *
+		 * A receiving node:
+		 *...
+		 *    - if `num_htlcs` is not equal to the number of HTLC outputs in the
+		 * local commitment transaction:
+		 *      - MUST fail the channel.
+		 *
+		 * TODO: Repeat this check for HTLCs in the splice tlv
+		 */
+		if (tal_count(splice_htlc_sig) != tal_count(splice_txs) - 1)
+			peer_failed_warn(peer->pps, &peer->channel_id,
+					 "Expected %zu htlc sigs, not %zu",
+					 tal_count(splice_txs) - 1, tal_count(splice_htlc_sig));
+
+		/* BOLT #2:
+		 *
+		 *   - if any `htlc_signature` is not valid for the corresponding HTLC
+		 *     transaction OR non-compliant with LOW-S-standard rule...:
+		 *     - MUST fail the channel.
+		 */
+		for (i = 0; i < tal_count(splice_htlc_sig); i++) {
+			u8 *wscript;
+
+			wscript = bitcoin_tx_output_get_witscript(tmpctx, splice_txs[0],
+								  splice_txs[i+1]->wtx->inputs[0].index);
+
+			if (!check_tx_sig(splice_txs[1+i], 0, NULL, wscript,
+					  &remote_htlckey, &splice_htlc_sig[i]))
+				peer_failed_warn(peer->pps, &peer->channel_id,
+						 "Bad splicecommit_sig signature %s for htlc %s wscript %s key %s",
+						 type_to_string(msg, struct bitcoin_signature, &splice_htlc_sig[i]),
+						 type_to_string(msg, struct bitcoin_tx, splice_txs[1+i]),
+						 tal_hex(msg, wscript),
+						 type_to_string(msg, struct pubkey,
+								&remote_htlckey));
+		}
 	}
 
 	/* BOLT #2:
