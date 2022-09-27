@@ -276,6 +276,10 @@ static void maybe_send_stfu(struct peer *peer)
 		return;
 	}
 
+	status_debug("maybe_send_stfu but yeschanneld is %s",
+		type_to_string(tmpctx, struct channel_id,
+					       &peer->channel_id));
+
 	if (!peer->stfu_sent[LOCAL] && !pending_updates(peer->channel, LOCAL, false)) {
 		status_debug("Sending peer that we want to STFU.");
 		u8 *msg = towire_stfu(NULL, &peer->channel_id,
@@ -2864,6 +2868,32 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 	struct channel_id cid;
 	struct bitcoin_txid txid;
 	int splice_funding_index = -1;
+	struct bitcoin_blkid genesis_blockhash;
+	struct channel_id channel_id;
+	u32 funding_feerate_perkw;
+	struct pubkey splice_remote_pubkey;
+
+	if (!fromwire_splice(inmsg,
+			     &genesis_blockhash,
+			     &channel_id,
+			     &funding_feerate_perkw,
+			     &splice_remote_pubkey))
+		peer_failed_warn(peer->pps, &peer->channel_id,
+				 "Bad wire_splice %s", tal_hex(tmpctx, inmsg));
+
+	if (!bitcoin_blkid_eq(&genesis_blockhash, &chainparams->genesis_blockhash))
+		peer_failed_warn(peer->pps, &peer->channel_id,
+				 "Bad splice blockhash");
+
+	// DTODO use new funding feerate
+
+	if (!channel_id_eq(&channel_id, &peer->channel_id))
+		peer_failed_warn(peer->pps, &peer->channel_id,
+				 "Splice internal error: mismatched channelid");
+
+	if (!pubkey_eq(&splice_remote_pubkey, &peer->channel->funding_pubkey[REMOTE]))
+		peer_failed_warn(peer->pps, &peer->channel_id,
+				 "Splice doesnt support changing pubkeys");
 
 	msg = towire_splice_ack(tmpctx,
 				&chainparams->genesis_blockhash,
@@ -3246,6 +3276,29 @@ static void handle_peer_splice_ack(struct peer *peer, const u8 *inmsg)
 {
 	status_debug("[SPLICE] handle_peer_splice_ack");
 
+	struct bitcoin_blkid genesis_blockhash;
+	struct channel_id channel_id;
+	struct pubkey splice_remote_pubkey;
+
+	if (!fromwire_splice_ack(inmsg,
+			     &genesis_blockhash,
+			     &channel_id,
+			     &splice_remote_pubkey))
+		peer_failed_warn(peer->pps, &peer->channel_id,
+				 "Bad wire_splice_ack %s", tal_hex(tmpctx, inmsg));
+
+	if (!bitcoin_blkid_eq(&genesis_blockhash, &chainparams->genesis_blockhash))
+		peer_failed_warn(peer->pps, &peer->channel_id,
+				 "Bad splice[ACK] blockhash");
+
+	if (!channel_id_eq(&channel_id, &peer->channel_id))
+		peer_failed_warn(peer->pps, &peer->channel_id,
+				 "Splice[ACK] internal error: mismatched channelid");
+
+	if (!pubkey_eq(&splice_remote_pubkey, &peer->channel->funding_pubkey[REMOTE]))
+		peer_failed_warn(peer->pps, &peer->channel_id,
+				 "Splice[ACK] doesnt support changing pubkeys");
+
 	const u8 *wit_script;
 	u8 *outmsg;
 	struct interactivetx_context ictx;
@@ -3458,6 +3511,14 @@ static void handle_splice_finalize(struct peer *peer, const u8 *inmsg)
 	u64 total_in = 0;
 	u64 change_out = 0;
 
+// /* Simple operations: val = a + b, val = a - b. */
+// WARN_UNUSED_RESULT bool amount_msat_add(struct amount_msat *val,
+// 					struct amount_msat a,
+// 					struct amount_msat b);
+
+	// DTODO switch to amount_msat_add everywhere
+
+
 	for (int i = 0; i < ictx.current_psbt->tx->num_inputs; i++) {
 
 		u64 amount = psbt_input_get_amount(ictx.current_psbt, i).satoshis;
@@ -3615,6 +3676,8 @@ static void handle_splice_signed(struct peer *peer, const u8 *inmsg)
 		status_failed(STATUS_FAIL_INTERNAL_ERROR,
 			      "Unable to set signature internally");
 
+	// Look at closingd to see how they order & put signatures
+
 	psbt_finalize_multisig_signatures(signed_psbt,
 					  &signed_psbt->inputs[splice_funding_index]);
 
@@ -3744,6 +3807,14 @@ static void handle_splice_signed(struct peer *peer, const u8 *inmsg)
 
 		DLOG(buf);
 
+		// Look at closingd to see how they order & put signatures
+		// closingd.c
+		// channel_set_last_tx
+		//  bitcoin_witness_2of2 (in sign_last_transaction)
+
+		// wallet.h add splicing type to transaction annotation
+		// wallet_transaction_annotate
+
 		final_sigs_cnt = psbt_finalize_multisig_signatures(signed_psbt,
 				&signed_psbt->inputs[splice_funding_index]);
 
@@ -3812,7 +3883,9 @@ static void handle_splice_stfu_success(struct peer *peer)
 {
 	u8 *msg;
 
-	status_debug("[SPLICE] handle_splice_stfu_success");
+	status_debug("[SPLICE] handle_splice_stfu_success channeld is %s",
+		type_to_string(tmpctx, struct channel_id,
+					       &peer->channel_id));
 
 	msg = towire_splice(tmpctx,
 			    &chainparams->genesis_blockhash,
@@ -3841,6 +3914,10 @@ static void handle_splice_init(struct peer *peer, const u8 *inmsg)
 static void peer_in(struct peer *peer, const u8 *msg)
 {
 	enum peer_wire type = fromwire_peektype(msg);
+
+	status_debug("[channeld] peer_in channeld is %s",
+		type_to_string(tmpctx, struct channel_id,
+					       &peer->channel_id));
 
 	if (handle_peer_error(peer->pps, &peer->channel_id, msg))
 		return;
