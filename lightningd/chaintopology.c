@@ -368,24 +368,24 @@ static void update_feerates(struct bitcoind *bitcoind,
 		/* But to avoid updating forever, only apply smoothing when its
 		 * effect is more then 10 percent */
 		if (abs((int)feerate - (int)feerate_smooth) > (0.1 * feerate)) {
-			feerate = feerate_smooth;
+			feerate = feerate_smooth;/*
 			log_debug(topo->log,
 					  "... polled feerate estimate for %s (%u) smoothed to %u (alpha=%.2f)",
 					  feerate_name(i), satoshi_per_kw[i],
-					  feerate, alpha);
+					  feerate, alpha);*/
 		}
 
-		if (feerate < feerate_floor()) {
+		if (feerate < feerate_floor()) {/*
 			feerate = feerate_floor();
 			log_debug(topo->log,
 					  "... feerate estimate for %s hit floor %u",
-					  feerate_name(i), feerate);
+					  feerate_name(i), feerate);*/
 		}
 
-		if (feerate != topo->feerate[i]) {
+		if (feerate != topo->feerate[i]) {/*
 			log_debug(topo->log, "Feerate estimate for %s set to %u (was %u)",
 				  feerate_name(i),
-				  feerate, topo->feerate[i]);
+				  feerate, topo->feerate[i]);*/
 		}
 		topo->feerate[i] = feerate;
 

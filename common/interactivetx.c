@@ -10,7 +10,6 @@
 #include <common/billboard.h>
 #include <common/blockheight_states.h>
 #include <common/channel_type.h>
-#include <common/gossip_rcvd_filter.h>
 #include <common/gossip_store.h>
 #include <common/initial_channel.h>
 #include <common/lease_rates.h>
@@ -168,6 +167,7 @@ static u8 *read_next_msg(const tal_t *ctx,
 		case WIRE_SHUTDOWN:
 		case WIRE_SPLICE:
 		case WIRE_SPLICE_ACK:
+		case WIRE_SPLICE_LOCKED:
 #if EXPERIMENTAL_FEATURES
 		case WIRE_STFU:
 #endif
@@ -670,6 +670,7 @@ char *process_interactivetx_updates(const tal_t *ctx,
 #if EXPERIMENTAL_FEATURES
 		case WIRE_SPLICE:
 		case WIRE_SPLICE_ACK:
+		case WIRE_SPLICE_LOCKED:
 		case WIRE_STFU:
 #endif
 			return tal_fmt(ctx, "Unexpected wire message %s",

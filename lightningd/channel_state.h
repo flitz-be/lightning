@@ -40,6 +40,9 @@ enum channel_state {
 
 	/* Dual-funded channel, waiting for lock-in */
 	DUALOPEND_AWAITING_LOCKIN,
+
+	/* super awesome comment explaining this */
+	CHANNELD_AWAITING_SPLICE = 0x80 | CHANNELD_NORMAL,
 };
 #define CHANNEL_STATE_MAX DUALOPEND_AWAITING_LOCKIN
 
