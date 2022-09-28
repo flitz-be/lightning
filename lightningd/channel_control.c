@@ -500,6 +500,8 @@ static void handle_add_inflight(struct lightningd *ld,
 
 	bitcoin_tx = bitcoin_tx_with_psbt(tmpctx, psbt);
 
+	log_debug(channel->log, "[SPLICE?] Adding inflight!");
+
 	inflight = new_inflight(channel,
 				&outpoint,
 				feerate,
@@ -1414,11 +1416,11 @@ bool channel_tell_depth(struct lightningd *ld,
 
 		if(depth >= 6) {
 
-			u8 *msg = towire_channeld_inflight_mindepth(NULL,
-								    txid,
-								    depth);
+			// u8 *msg = towire_channeld_inflight_mindepth(NULL,
+			// 					    txid,
+			// 					    depth);
 
-			subd_send_msg(channel->owner, take(msg));
+			// subd_send_msg(channel->owner, take(msg));
 		}
 	}
 
@@ -1450,7 +1452,7 @@ bool channel_tell_depth(struct lightningd *ld,
 	subd_send_msg(channel->owner,
 		      take(towire_channeld_funding_depth(
 			  NULL, channel->scid, channel->alias[LOCAL], depth,
-			  channel->state & CHANNELD_AWAITING_SPLICE)));
+			  channel->state == CHANNELD_AWAITING_SPLICE)));
 
 	if (channel->remote_channel_ready &&
 	    channel->state == CHANNELD_AWAITING_LOCKIN &&
