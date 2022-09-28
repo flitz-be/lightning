@@ -10,6 +10,7 @@ cd Development/lightningTwo
 source contrib/startup_regtest.sh
 
 stop_ln
+destroy_ln
 rm -rf "$PATH_TO_BITCOIN"
 
 
