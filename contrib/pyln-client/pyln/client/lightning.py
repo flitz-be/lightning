@@ -1132,6 +1132,29 @@ class LightningRpc(UnixDomainSocketRpc):
         }
         return self.call("splice_init", payload)
 
+    def splice_update(self, peer_id, psbt):
+        """ Update a splice """
+        payload = {
+            "id": peer_id,
+            "psbt": psbt
+        }
+        return self.call("splice_update", payload)
+
+    def splice_finalize(self, peer_id):
+        """ Finalize a splice """
+        payload = {
+            "id": peer_id
+        }
+        return self.call("splice_finalize", payload)
+
+    def splice_signed(self, peer_id, psbt):
+        """ Initiate a splice """
+        payload = {
+            "id": peer_id,
+            "psbt": psbt
+        }
+        return self.call("splice_signed", payload)
+
     def paystatus(self, bolt11=None):
         """Detail status of attempts to pay {bolt11} or any."""
         payload = {

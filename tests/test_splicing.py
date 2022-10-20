@@ -8,6 +8,7 @@ from utils import (
 import pytest
 import re
 import unittest
+import time
 
 
 def find_next_feerate(node, peer):
@@ -32,10 +33,50 @@ def test_splice(node_factory, bitcoind):
     # ret = l1.rpc.ping(l2.info['id'], 0, 0)
     # assert ret['totlen'] == 4
 
-    # l1.rpc.splice_init(l2.info['id'])
+    # time.sleep(4)
 
-    l2.daemon.wait_for_log(r'to CHANNELD_NORMAL')
-    l1.daemon.wait_for_log(r'to CHANNELD_NORMAL')
+    print("id is " + l2.rpc.getinfo()['id'])
+
+    time.sleep(1)
+
+    result = l1.rpc.splice_init(l2.rpc.getinfo()['id'])
+
+    funds_result = l1.rpc.fundpsbt("100000sat", "slow", 166)
+
+    result = bitcoind.rpc.joinpsbts([result['psbt'], funds_result['psbt']])
+
+    result = l1.rpc.splice_update(l2.rpc.getinfo()['id'], result)
+
+    result = l1.rpc.splice_finalize(l2.rpc.getinfo()['id'])
+
+    result = l1.rpc.signpsbt(result['psbt'])
+
+    result = l1.rpc.splice_signed(l2.rpc.getinfo()['id'], result['signed_psbt'])
+
+    # send some payments, mine a block or two
+    inv = l2.rpc.invoice(10**2, '1', 'no_1')
+    l1.rpc.pay(inv['bolt11'])
+
+    bitcoind.generate_block(6, wait_for_mempool=1)
+
+    # send some payments, mine a block or two
+    inv = l2.rpc.invoice(10**2, '2', 'no_2')
+    l1.rpc.pay(inv['bolt11'])
+
+    # PSBT=$(l1-cli splice_init $PEER_ID | jq -r ".psbt")
+    # PSBT_FUNDS=$(l1-cli fundpsbt 100000sat slow 166 | jq -r ".psbt")
+    # PSBT=$(bt-cli joinpsbts "[\"$PSBT\", \"$PSBT_FUNDS\"]")
+    # PSBT=$(l1-cli splice_update $PEER_ID $PSBT | jq -r ".psbt")
+    # PSBT=$(l1-cli splice_finalize $PEER_ID | jq -r ".psbt")
+    # PSBT=$(l1-cli signpsbt -k psbt="$PSBT" | jq -r ".signed_psbt")
+    # l1-cli splice_signed $PEER_ID $PSBT
+
+    l2.daemon.wait_for_log(r'CHANNELD_AWAITING_SPLICE to CHANNELD_NORMAL')
+    l1.daemon.wait_for_log(r'CHANNELD_AWAITING_SPLICE to CHANNELD_NORMAL')
+
+    # send some payments, mine a block or two
+    inv = l2.rpc.invoice(10**2, '3', 'no_3')
+    l1.rpc.pay(inv['bolt11'])
 
     result = True
 
