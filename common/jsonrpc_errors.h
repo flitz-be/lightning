@@ -64,6 +64,7 @@ enum jsonrpc_errcode {
 
 	/* Splice errors */
 	SPLICE_BROADCAST_FAIL = 350,
+	SPLICE_WRONG_OWNER = 351,
 
 	/* `connect` errors */
 	CONNECT_NO_KNOWN_ADDRESS = 400,
