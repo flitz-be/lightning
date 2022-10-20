@@ -330,7 +330,7 @@ void psbt_input_set_serial_id(const tal_t *ctx,
 			      struct wally_psbt_input *input,
 			      u64 serial_id)
 {
-	u8 *key = psbt_make_key(ctx, PSBT_TYPE_SERIAL_ID, NULL);
+	u8 *key = psbt_make_key(tmpctx, PSBT_TYPE_SERIAL_ID, NULL);
 	beint64_t bev = cpu_to_be64(serial_id);
 
 	psbt_input_set_unknown(ctx, input, key, &bev, sizeof(bev));
@@ -341,7 +341,7 @@ void psbt_output_set_serial_id(const tal_t *ctx,
 			       struct wally_psbt_output *output,
 			       u64 serial_id)
 {
-	u8 *key = psbt_make_key(ctx, PSBT_TYPE_SERIAL_ID, NULL);
+	u8 *key = psbt_make_key(tmpctx, PSBT_TYPE_SERIAL_ID, NULL);
 	beint64_t bev = cpu_to_be64(serial_id);
 	psbt_output_set_unknown(ctx, output, key, &bev, sizeof(bev));
 }
