@@ -205,6 +205,10 @@ struct state {
 
 	/* State of inflight funding transaction attempt */
 	struct tx_state *tx_state;
+
+	/* Amount of leased sats requested, persisted across
+	 * RBF attempts, so we know when we've messed up lol */
+	struct amount_sat *requested_lease;
 };
 
 /* psbt_changeset_get_next - Get next message to send
@@ -1285,7 +1289,6 @@ static u8 *opening_negotiate_msg(const tal_t *ctx, struct state *state)
 		case WIRE_CHANNEL_REESTABLISH:
 		case WIRE_ANNOUNCEMENT_SIGNATURES:
 		case WIRE_GOSSIP_TIMESTAMP_FILTER:
-		case WIRE_OBS2_ONION_MESSAGE:
 		case WIRE_ONION_MESSAGE:
 		case WIRE_ACCEPT_CHANNEL2:
 		case WIRE_TX_ADD_INPUT:
@@ -1634,7 +1637,6 @@ static bool run_tx_interactive(struct state *state,
 		case WIRE_CHANNEL_REESTABLISH:
 		case WIRE_ANNOUNCEMENT_SIGNATURES:
 		case WIRE_GOSSIP_TIMESTAMP_FILTER:
-		case WIRE_OBS2_ONION_MESSAGE:
 		case WIRE_ONION_MESSAGE:
 		case WIRE_TX_SIGNATURES:
 		case WIRE_OPEN_CHANNEL2:
@@ -2063,7 +2065,7 @@ static void accepter_start(struct state *state, const u8 *oc2_msg)
 	struct channel_id cid, full_cid;
 	char *err_reason;
 	u8 *msg;
-	struct amount_sat total, requested_amt, our_accept;
+	struct amount_sat total, our_accept;
 	enum dualopend_wire msg_type;
 	struct tx_state *tx_state = state->tx_state;
 
@@ -2099,12 +2101,12 @@ static void accepter_start(struct state *state, const u8 *oc2_msg)
 
 	/* This is an `option_will_fund` request */
 	if (open_tlv->request_funds) {
-		requested_amt
-			= amount_sat(open_tlv->request_funds->requested_sats);
+		state->requested_lease = tal(state, struct amount_sat);
+		state->requested_lease->satoshis /* Raw: u64 -> sat conversion */
+			= open_tlv->request_funds->requested_sats;
 		tx_state->blockheight
 			= open_tlv->request_funds->blockheight;
-	} else
-		requested_amt = AMOUNT_SAT(0);
+	}
 
 	/* BOLT-* #2
 	 * If the peer's revocation basepoint is unknown (e.g.
@@ -2170,7 +2172,7 @@ static void accepter_start(struct state *state, const u8 *oc2_msg)
 					 state->channel_flags,
 					 tx_state->tx_locktime,
 					 state->upfront_shutdown_script[REMOTE],
-					 requested_amt,
+					 state->requested_lease,
 					 tx_state->blockheight);
 
 	wire_sync_write(REQ_FD, take(msg));
@@ -2228,9 +2230,10 @@ static void accepter_start(struct state *state, const u8 *oc2_msg)
 		 * `open_channel2`.`funding_satoshis`, the lease fee,
 		 * and their tx weight * `funding_feerate_perkw` / 1000.
 		 */
+		assert(state->requested_lease);
 		if (!lease_rates_calc_fee(tx_state->rates,
 					  tx_state->accepter_funding,
-					  requested_amt,
+					  *state->requested_lease,
 					  tx_state->feerate_per_kw_funding,
 					  &tx_state->lease_fee))
 			negotiation_failed(state,
@@ -2712,10 +2715,11 @@ static void opener_start(struct state *state, u8 *msg)
 	struct tlv_accept_tlvs *a_tlv;
 	struct channel_id cid;
 	char *err_reason;
-	struct amount_sat total, requested_sats;
+	struct amount_sat total;
 	bool dry_run;
 	struct lease_rates *expected_rates;
 	struct tx_state *tx_state = state->tx_state;
+	struct amount_sat *requested_lease;
 
 	if (!fromwire_dualopend_opener_init(state, msg,
 					    &tx_state->psbt,
@@ -2725,7 +2729,7 @@ static void opener_start(struct state *state, u8 *msg)
 					    &state->feerate_per_kw_commitment,
 					    &tx_state->feerate_per_kw_funding,
 					    &state->channel_flags,
-					    &requested_sats,
+					    &requested_lease,
 					    &tx_state->blockheight,
 					    &dry_run,
 					    &expected_rates))
@@ -2734,6 +2738,9 @@ static void opener_start(struct state *state, u8 *msg)
 	state->our_role = TX_INITIATOR;
 	tx_state->tx_locktime = tx_state->psbt->tx->locktime;
 	open_tlv = tlv_opening_tlvs_new(tmpctx);
+
+	if (requested_lease)
+		state->requested_lease = tal_steal(state, requested_lease);
 
 	/* BOLT-* #2
 	 * If the peer's revocation basepoint is unknown (e.g.
@@ -2757,11 +2764,11 @@ static void opener_start(struct state *state, u8 *msg)
 			state->upfront_shutdown_script[LOCAL];
 	}
 
-	if (!amount_sat_zero(requested_sats)) {
+	if (state->requested_lease) {
 		open_tlv->request_funds =
 			tal(open_tlv, struct tlv_opening_tlvs_request_funds);
 		open_tlv->request_funds->requested_sats =
-			requested_sats.satoshis; /* Raw: struct -> wire */
+			state->requested_lease->satoshis; /* Raw: struct -> wire */
 		open_tlv->request_funds->blockheight = tx_state->blockheight;
 	}
 
@@ -2870,26 +2877,26 @@ static void opener_start(struct state *state, u8 *msg)
 	/* If we've requested funds and they've failed to provide
 	 * to lease us (or give them to us for free?!) then we fail.
 	 * This isn't spec'd but it makes the UX predictable */
-	if (!amount_sat_zero(requested_sats)
-	    && amount_sat_less(tx_state->accepter_funding, requested_sats))
+	if (state->requested_lease
+	    && amount_sat_less(tx_state->accepter_funding,
+			       *state->requested_lease))
 			negotiation_failed(state,
 					   "We requested %s, which is more"
 					   " than they've offered to provide"
 					   " (%s)",
 					   type_to_string(tmpctx,
 							  struct amount_sat,
-							  &requested_sats),
+							  state->requested_lease),
 					   type_to_string(tmpctx,
 							  struct amount_sat,
 							  &tx_state->accepter_funding));
-
 
 	/* BOLT- #2:
 	 * The accepting node:  ...
 	 *  - if they decide to accept the offer:
 	 *    - MUST include a `will_fund` tlv
 	 */
-	if (!amount_sat_zero(requested_sats) && a_tlv->will_fund) {
+	if (state->requested_lease && a_tlv->will_fund) {
 		char *err_msg;
 		struct lease_rates *rates = &a_tlv->will_fund->lease_rates;
 
@@ -2932,7 +2939,7 @@ static void opener_start(struct state *state, u8 *msg)
 		 * and their tx weight * `funding_feerate_perkw` / 1000.
 		 */
 		if (!lease_rates_calc_fee(rates, tx_state->accepter_funding,
-					  requested_sats,
+					  *state->requested_lease,
 					  tx_state->feerate_per_kw_funding,
 					  &tx_state->lease_fee))
 			negotiation_failed(state,
@@ -3175,9 +3182,7 @@ static void rbf_local_start(struct state *state, u8 *msg)
 	tx_state->remoteconf = state->tx_state->remoteconf;
 
 	if (!fromwire_dualopend_rbf_init(tx_state, msg,
-					 state->our_role == TX_INITIATOR ?
-					 &tx_state->opener_funding :
-						&tx_state->accepter_funding,
+					 &tx_state->opener_funding,
 					 &tx_state->feerate_per_kw_funding,
 					 &tx_state->psbt))
 		master_badmsg(WIRE_DUALOPEND_RBF_INIT, msg);
@@ -3203,9 +3208,7 @@ static void rbf_local_start(struct state *state, u8 *msg)
 
 	tx_state->tx_locktime = tx_state->psbt->tx->locktime;
 	msg = towire_init_rbf(tmpctx, &state->channel_id,
-			      state->our_role == TX_INITIATOR ?
-				tx_state->opener_funding :
-				tx_state->accepter_funding,
+			      tx_state->opener_funding,
 			      tx_state->tx_locktime,
 			      tx_state->feerate_per_kw_funding);
 
@@ -3219,9 +3222,7 @@ static void rbf_local_start(struct state *state, u8 *msg)
 	}
 
 	if (!fromwire_ack_rbf(msg, &cid,
-			      state->our_role == TX_INITIATOR ?
-					&tx_state->accepter_funding :
-					&tx_state->opener_funding))
+			      &tx_state->accepter_funding))
 		open_err_fatal(state, "Parsing ack_rbf %s",
 			       tal_hex(tmpctx, msg));
 
@@ -3254,6 +3255,24 @@ static void rbf_local_start(struct state *state, u8 *msg)
 			      type_to_string(tmpctx,
 					     struct amount_sat,
 					     &total));
+		goto free_rbf_ctx;
+	}
+
+	/* If their new amount is less than the lease we asked for,
+	 * abort, abort! */
+	if (state->requested_lease
+	    && amount_sat_less(tx_state->accepter_funding,
+			       *state->requested_lease)) {
+		negotiation_failed(state,
+				   "We requested %s, which is more"
+				   " than they've offered to provide"
+				   " (%s)",
+				   type_to_string(tmpctx,
+						  struct amount_sat,
+						  state->requested_lease),
+				   type_to_string(tmpctx,
+						  struct amount_sat,
+						  &tx_state->accepter_funding));
 		goto free_rbf_ctx;
 	}
 
@@ -3294,9 +3313,7 @@ static void rbf_remote_start(struct state *state, const u8 *rbf_msg)
 	tx_state = new_tx_state(rbf_ctx);
 
 	if (!fromwire_init_rbf(rbf_msg, &cid,
-			       state->our_role == TX_INITIATOR ?
-					&tx_state->accepter_funding :
-					&tx_state->opener_funding,
+			       &tx_state->opener_funding,
 			       &tx_state->tx_locktime,
 			       &tx_state->feerate_per_kw_funding))
 		open_err_fatal(state, "Parsing init_rbf %s",
@@ -3317,8 +3334,6 @@ static void rbf_remote_start(struct state *state, const u8 *rbf_msg)
 			      "Last funding attempt not complete:"
 			      " missing your funding tx_sigs");
 
-	/* FIXME: should we check for currently in progress? */
-
 	/* Copy over the channel config info -- everything except
 	 * the reserve will be the same */
 	tx_state->localconf = state->tx_state->localconf;
@@ -3336,11 +3351,12 @@ static void rbf_remote_start(struct state *state, const u8 *rbf_msg)
 	/* We ask master if this is ok */
 	msg = towire_dualopend_got_rbf_offer(NULL,
 					     &state->channel_id,
-					     state->our_role == TX_INITIATOR ?
-						tx_state->accepter_funding :
-						tx_state->opener_funding,
+					     state->tx_state->opener_funding,
+					     tx_state->opener_funding,
+					     state->tx_state->accepter_funding,
 					     tx_state->feerate_per_kw_funding,
-					     tx_state->tx_locktime);
+					     tx_state->tx_locktime,
+					     state->requested_lease);
 
 	wire_sync_write(REQ_FD, take(msg));
 	msg = wire_sync_read(tmpctx, REQ_FD);
@@ -3791,7 +3807,6 @@ static u8 *handle_peer_in(struct state *state)
 	case WIRE_CHANNEL_REESTABLISH:
 	case WIRE_ANNOUNCEMENT_SIGNATURES:
 	case WIRE_GOSSIP_TIMESTAMP_FILTER:
-	case WIRE_OBS2_ONION_MESSAGE:
 	case WIRE_ONION_MESSAGE:
 	case WIRE_ACCEPT_CHANNEL2:
 	case WIRE_TX_ADD_INPUT:
@@ -3854,7 +3869,7 @@ int main(int argc, char *argv[])
 	struct fee_states *fee_states;
 	enum side opener;
 	u8 *msg;
-	struct amount_sat total_funding;
+	struct amount_sat total_funding, *requested_lease;
 	struct amount_msat our_msat;
 	const struct channel_type *type;
 
@@ -3898,6 +3913,9 @@ int main(int argc, char *argv[])
 			= state->shutdown_sent[REMOTE]
 			= false;
 
+		/* No lease requested at start! */
+		state->requested_lease = NULL;
+
 	} else if (fromwire_dualopend_reinit(state, msg,
 					     &chainparams,
 					     &state->our_features,
@@ -3933,13 +3951,18 @@ int main(int argc, char *argv[])
 					     &state->tx_state->lease_expiry,
 					     &state->tx_state->lease_commit_sig,
 					     &state->tx_state->lease_chan_max_msat,
-					     &state->tx_state->lease_chan_max_ppt)) {
+					     &state->tx_state->lease_chan_max_ppt,
+					     &requested_lease)) {
 
 		/*~ We only reconnect on channels that the
 		 * saved the the database (exchanged commitment sigs) */
 		type = default_channel_type(NULL,
 					    state->our_features,
 					    state->their_features);
+
+		if (requested_lease)
+			state->requested_lease = tal_steal(state, requested_lease);
+
 		state->channel = new_initial_channel(state,
 						     &state->channel_id,
 						     &state->tx_state->funding,

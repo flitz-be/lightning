@@ -4,6 +4,7 @@
 #include <ccan/mem/mem.h>
 #include <common/onion.h>
 #include <common/onionreply.h>
+#include <common/overflows.h>
 #include <common/sphinx.h>
 
 
@@ -103,17 +104,29 @@ size_t sphinx_path_payloads_size(const struct sphinx_path *path)
 	return size;
 }
 
-void sphinx_add_hop(struct sphinx_path *path, const struct pubkey *pubkey,
-		    const u8 *payload TAKES)
+bool sphinx_add_hop_has_length(struct sphinx_path *path, const struct pubkey *pubkey,
+			       const u8 *payload TAKES)
 {
 	struct sphinx_hop sp;
+	bigsize_t lenlen, prepended_len;
+
+	/* You promised size was prepended! */
+	if (tal_bytelen(payload) == 0)
+		return false;
+	lenlen = bigsize_get(payload, tal_bytelen(payload), &prepended_len);
+	if (add_overflows_u64(lenlen, prepended_len))
+		return false;
+	if (lenlen + prepended_len != tal_bytelen(payload))
+		return false;
+
 	sp.raw_payload = tal_dup_talarr(path, u8, payload);
 	sp.pubkey = *pubkey;
 	tal_arr_expand(&path->hops, sp);
+	return true;
 }
 
-void sphinx_add_modern_hop(struct sphinx_path *path, const struct pubkey *pubkey,
-			   const u8 *payload TAKES)
+void sphinx_add_hop(struct sphinx_path *path, const struct pubkey *pubkey,
+		    const u8 *payload TAKES)
 {
 	u8 *with_len = tal_arr(NULL, u8, 0);
 	size_t len = tal_bytelen(payload);
@@ -122,7 +135,8 @@ void sphinx_add_modern_hop(struct sphinx_path *path, const struct pubkey *pubkey
 	if (taken(payload))
 		tal_free(payload);
 
-	sphinx_add_hop(path, pubkey, take(with_len));
+	if (!sphinx_add_hop_has_length(path, pubkey, take(with_len)))
+		abort();
 }
 
 /* Small helper to append data to a buffer and update the position
@@ -601,7 +615,8 @@ struct route_step *process_onionpacket(
 	u8 *paddedheader;
 	size_t payload_size;
 	bigsize_t shift_size;
-	bool valid;
+	const u8 *cursor;
+	size_t max;
 
 	step->next = talz(step, struct onionpacket);
 	step->next->version = msg->version;
@@ -624,23 +639,29 @@ struct route_step *process_onionpacket(
 	if (!blind_group_element(&step->next->ephemeralkey, &msg->ephemeralkey, blind))
 		return tal_free(step);
 
-	payload_size = onion_payload_length(paddedheader,
-					    tal_bytelen(msg->routinginfo),
-					    has_realm,
-					    &valid, NULL);
+	/* Now, try to pull data out. */
+	cursor = paddedheader;
+	max = tal_bytelen(msg->routinginfo);
 
-	/* Can't decode?  Treat it as terminal. */
-	if (!valid) {
-		shift_size = payload_size;
-		memset(step->next->hmac.bytes, 0, sizeof(step->next->hmac.bytes));
-	} else {
-		assert(payload_size <= tal_bytelen(msg->routinginfo) - HMAC_SIZE);
-		/* Copy hmac */
-		shift_size = payload_size + HMAC_SIZE;
-		memcpy(step->next->hmac.bytes,
-		       paddedheader + payload_size, HMAC_SIZE);
-	}
-	step->raw_payload = tal_dup_arr(step, u8, paddedheader, payload_size, 0);
+	/* Any of these could fail, falling thru with cursor == NULL */
+	payload_size = fromwire_bigsize(&cursor, &max);
+	/* FIXME: raw_payload *includes* the length, which is redundant and
+	 * means we can't just ust fromwire_tal_arrn. */
+	fromwire_pad(&cursor, &max, payload_size);
+	if (cursor != NULL)
+		step->raw_payload = tal_dup_arr(step, u8, paddedheader,
+						cursor - paddedheader, 0);
+	fromwire_hmac(&cursor, &max, &step->next->hmac);
+
+	/* BOLT-remove-legacy-onion #4:
+	 * Since no `payload` TLV value can ever be shorter than 2 bytes, `length` values of 0 and 1 are
+	 * reserved.  (`0` indicated a legacy format no longer supported, and `1` is reserved for future
+	 * use). */
+	if (payload_size < 2 || !cursor)
+		return tal_free(step);
+
+	/* This includes length field and hmac */
+	shift_size = cursor - paddedheader;
 
 	/* Left shift the current payload out and make the remainder the new onion */
 	step->next->routinginfo = tal_dup_arr(step->next,

@@ -65,7 +65,6 @@ CHANNELD_COMMON_OBJS :=				\
 	common/memleak.o			\
 	common/msg_queue.o			\
 	common/node_id.o			\
-	common/onion.o				\
 	common/onionreply.o			\
 	common/peer_billboard.o			\
 	common/peer_failed.o			\
@@ -80,7 +79,6 @@ CHANNELD_COMMON_OBJS :=				\
 	common/pseudorand.o			\
 	common/read_peer_msg.o			\
 	common/setup.o				\
-	common/sphinx.o				\
 	common/status.o				\
 	common/status_wire.o			\
 	common/subdaemon.o			\

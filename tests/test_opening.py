@@ -398,18 +398,27 @@ def test_v2_rbf_liquidity_ad(node_factory, bitcoind, chainparams):
                                    funding_feerate=next_feerate)
     update = l1.rpc.openchannel_update(chan_id, bump['psbt'])
     assert update['commitments_secured']
+
     # Sign our inputs, and continue
     signed_psbt = l1.rpc.signpsbt(update['psbt'])['signed_psbt']
     l1.rpc.openchannel_signed(chan_id, signed_psbt)
+
+    # There's data in the datastore now (l2 only)
+    assert l1.rpc.listdatastore() == {'datastore': []}
+    only_one(l2.rpc.listdatastore("funder/{}".format(chan_id))['datastore'])
 
     # what happens when the channel opens?
     bitcoind.generate_block(6)
     l1.daemon.wait_for_log('to CHANNELD_NORMAL')
 
+    # Datastore should be cleaned up!
+    assert l1.rpc.listdatastore() == {'datastore': []}
+    assert l2.rpc.listdatastore() == {'datastore': []}
+
     # This should be the accepter's amount
     fundings = only_one(only_one(l1.rpc.listpeers()['peers'])['channels'])['funding']
-    # FIXME: The lease goes away :(
-    assert Millisatoshi(0) == Millisatoshi(fundings['remote_funds_msat'])
+    # The lease is still there!
+    assert Millisatoshi(amount * 1000) == fundings['remote_funds_msat']
 
     wait_for(lambda: [c['active'] for c in l1.rpc.listchannels(l1.get_channel_scid(l2))['channels']] == [True, True])
 

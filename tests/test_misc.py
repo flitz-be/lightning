@@ -2281,6 +2281,10 @@ def test_makesecret(node_factory):
     assert l1.rpc.makesecret(hex="736362207365637265")["secret"] != secret
     assert l1.rpc.makesecret(hex="7363622073656372657401")["secret"] != secret
 
+    # Using string works!
+    assert l1.rpc.makesecret(string="scb secret")["secret"] == secret
+    assert l1.rpc.makesecret(None, "scb secret")["secret"] == secret
+
 
 def test_staticbackup(node_factory):
     """
@@ -2312,7 +2316,9 @@ def test_emergencyrecover(node_factory, bitcoind):
     """
     Test emergencyrecover
     """
-    l1, l2 = node_factory.get_nodes(2, opts=[{}, {}])
+    l1, l2 = node_factory.get_nodes(2, opts=[{'allow_broken_log': True, 'may_reconnect': True},
+                                             {'may_reconnect': True}])
+
     l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
     c12, _ = l1.fundchannel(l2, 10**5)
     stubs = l1.rpc.emergencyrecover()["stubs"]
@@ -2331,6 +2337,18 @@ def test_emergencyrecover(node_factory, bitcoind):
 
     listfunds = l1.rpc.listfunds()["channels"][0]
     assert listfunds["short_channel_id"] == "1x1x1"
+
+    l1.daemon.wait_for_log('peer_out WIRE_ERROR')
+    l2.daemon.wait_for_log('State changed from CHANNELD_NORMAL to AWAITING_UNILATERAL')
+
+    bitcoind.generate_block(5, wait_for_mempool=1)
+    sync_blockheight(bitcoind, [l1, l2])
+
+    l1.daemon.wait_for_log(r'All outputs resolved.*')
+    wait_for(lambda: l1.rpc.listfunds()["channels"][0]["state"] == "ONCHAIN")
+    # Check if funds are recovered.
+    assert l1.rpc.listfunds()["channels"][0]["state"] == "ONCHAIN"
+    assert l2.rpc.listfunds()["channels"][0]["state"] == "ONCHAIN"
 
 
 def test_commitfee_option(node_factory):

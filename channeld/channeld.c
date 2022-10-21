@@ -3890,7 +3890,6 @@ static void peer_in(struct peer *peer, const u8 *msg)
 	case WIRE_PONG:
 	case WIRE_WARNING:
 	case WIRE_ERROR:
-	case WIRE_OBS2_ONION_MESSAGE:
 	case WIRE_ONION_MESSAGE:
 		abort();
 	}
@@ -5513,7 +5512,6 @@ static void init_channel(struct peer *peer)
 				    &remote_ann_bitcoin_sig,
 				    &channel_type,
 				    &dev_fast_gossip,
-				    &dev_fail_process_onionpacket,
 				    &dev_disable_commit,
 				    &pbases,
 				    &reestablish_only,
