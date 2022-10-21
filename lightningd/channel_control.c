@@ -26,6 +26,7 @@
 #include <wally_bip32.h>
 #include <wally_psbt.h>
 #include <fcntl.h>
+#include <ccan/str/hex/hex.h>
 
 struct splice_command {
 	/* Inside struct lightningd close_commands. */
@@ -224,7 +225,36 @@ static void handle_splice_lookup_tx(struct lightningd *ld,
 
 	tx = wallet_transaction_get(tmpctx, ld->wallet, &txid);
 
+	char *hexstr = tal_arr(tmpctx, char, hex_str_size(sizeof(bitcoin_txid)));
+
+	bitcoin_txid_to_hex(&txid, hexstr, tal_count(hexstr));
+
+	log_debug(channel->log,
+		  "handle_splice_lookup_tx txid %s for channel %s.",
+		  type_to_string(tmpctx, struct bitcoin_txid, &txid),
+		  type_to_string(tmpctx, struct channel_id, &channel->cid));
+
+	if(!tx)
+		log_debug(channel->log,
+			  "handle_splice_lookup_tx txid not found.");
+	else
+		log_debug(channel->log,
+			  "handle_splice_lookup_tx txid was found, tx: %s.",
+			  type_to_string(tmpctx, struct bitcoin_tx, tx));
+
+	if(!tx) {
+
+		channel_internal_error(channel,
+				       "channel control untable to find txid %s",
+				       hexstr);
+		return;
+	}
+
+	// Check that channel->owner is what we expect
+
+
 	outmsg = towire_channeld_splice_lookup_tx_result(NULL, tx);
+
 	subd_send_msg(channel->owner, take(outmsg));
 }
 
@@ -979,6 +1009,8 @@ static void handle_channel_get_inflight(struct channel *channel,
 		return;
 	}
 
+	assert(streq(channel->owner->name, "channeld"));
+
 	list_for_each(&channel->inflights, inflight, list) {
 
 		if(i == index) {
@@ -1449,6 +1481,10 @@ bool channel_tell_depth(struct lightningd *ld,
 		return true;
 	}
 
+	log_debug(channel->log,
+		  "Sending towire_channeld_funding_depth with channel state %s",
+		  channel_state_str(channel->state));
+
 	subd_send_msg(channel->owner,
 		      take(towire_channeld_funding_depth(
 			  NULL, channel->scid, channel->alias[LOCAL], depth,
@@ -1770,7 +1806,20 @@ static struct command_result *json_splice_init(struct command *cmd,
 
 	msg = towire_channeld_splice_init(tmpctx);
 
+	if(!streq(channel->owner->name, "channeld"))
+		return command_fail(cmd,
+				    SPLICE_WRONG_OWNER,
+				    "Splice needs to be in normal channeld"
+				    " owner mode.");
+
 	subd_send_msg(channel->owner, take(msg));
+
+	// struct json_stream *response;
+
+	// response = json_stream_success(cmd);
+	// json_add_string(response, "id", "test success");
+
+	// return command_success(cmd, response);
 
 	return command_still_pending(cmd);
 }
