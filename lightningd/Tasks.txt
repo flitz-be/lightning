@@ -3,33 +3,37 @@ Tasks:
 DONE * Make commit_sigs work during AWAITING_SPLICE
 DONE ** Figure out why first invoice payment after splice start takes forever
 DONE * Update DB schema
-** add commit sig to inflight
+DONE * Add helpful log messages in places to be able to see what's going on
+DONE * Figure out why we can't pay invoices after splice_init
+DONE * validate point of no return when lightningd
 DONE ** Make sure splice HTLC*commit sigs are being made
 DONE ** Make sure splice HTLC*commit sigs are being verified
-** Make sure splice HTLC*commit sigs are being stored in DB
 DONE * Make commit_sigs work after splice confirms
+DONE * Add back all commented out verification steps
+* Rename channeld *_splice_* functions to have more intuitive names
+* do byte ownership fee calculations
+* add back signature ordering logic and debug it
 * 
-* Add back all commented out verification steps
-
-* validate point of no return when lightningd
-* At the last step before signing the splice, validate all the commit sigs etc thoroughly before.
+** add commit sig to inflight
+** Make sure splice HTLC*commit sigs are being stored in inflight DB
+* 
+* Change splice RPC to use channel_id instead of peer_id
+*
 * 
 * Change all TODOs in my code to DTODOs
-* Add helpful log messages in places to be able to see what's going on
-* Figure out why we can't pay invoices after splice_init
-* Change splice RPC to use channel_id instead of peer_id
-* Rename channeld *_splice_* functiosn to have more intuitive names
-* Figure if we should remove the splice_finalized RPC call and remove it if so
-* Look through channel_control RPC commands and clean thing sup
-* Audit the help messages channel_control RPC commands and clean them up
-* Ensure splice is added to the docs and added it if needed
+* refactor RPC to not have splice_finalized anymore
+* Add RPC splice help message and audit splice RPC interface
+* Add splice to the docs!
+* 
 * Move wire updates to experiemental patches
-* Figure out if all the splicing code should go in #if EXPERIMENTAL
+* Add #if EXPERIMENTAL flags around code
+
+== potentially after PR / needs convos ==
+* Check the splice doesn't steal our funds before signing it
+
+== after PR list ==
+* do all the RECONNECT LOGIC things
 * Add timeout where we just send tx_abort when too much time has gone by
 ** And then put them there if needed
-** RECONNECT LOGIC
 
-
-
-Completed:
 
