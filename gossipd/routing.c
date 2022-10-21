@@ -2214,10 +2214,10 @@ void routing_channel_spent(struct routing_state *rstate,
 
 	/* FIXME: We should note that delay is not necessary (or even
 	 * sensible) for local channels! */
-	// if (local_direction(rstate, chan, NULL)) {
-	// 	channel_spent(rstate, chan);
-	// 	return;
-	// }
+	if (local_direction(rstate, chan, NULL)) {
+		channel_spent(rstate, chan);
+		return;
+	}
 
 	/* BOLT #7:
 	 * - once its funding output has been spent OR reorganized out:
