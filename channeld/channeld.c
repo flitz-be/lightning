@@ -2982,10 +2982,6 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 			    "Splicing bad tx_signatures %s",
 			    tal_hex(msg, msg));
 
-	sprintf(buf, "got txsig of len: %d", (int)tal_count(txsig_tlvs->funding_outpoint_sig));
-
-	DLOG(buf);
-
 	end_stfu_mode(peer);
 
 	// assert(tal_count(inws) == 1);
@@ -3022,11 +3018,6 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 		psbt_input_set_witscript(ictx.current_psbt,
 					 splice_funding_index,
 					 wit_script);
-
-		sprintf(buf, "accepter going into finalize_multisig with sigs: %d",
-			(int)ictx.current_psbt->inputs[splice_funding_index].signatures.num_items);
-
-		DLOG(buf);
 
 		final_sigs_cnt = psbt_finalize_multisig_signatures(ictx.current_psbt,
 				&ictx.current_psbt->inputs[splice_funding_index]);
@@ -3084,23 +3075,8 @@ static void handle_peer_splice(struct peer *peer, const u8 *inmsg)
 	struct bitcoin_tx *final_tx = bitcoin_tx_with_psbt(tmpctx,
 							   ictx.current_psbt);
 
-	sprintf(buf, "accepter side final_sigs_cnt: %d", final_sigs_cnt);
-
-	DLOG(buf);
-
-	// TODO: Assert final_sigs_cnt is correct value
+	// DTODO: Assert final_sigs_cnt is correct value
 	(void)final_sigs_cnt;
-
-	u8 *final_tx_bytes = linearize_tx(tmpctx, final_tx);
-
-	sprintf(buf, "accepter side final tx: %s", tal_hex(tmpctx, final_tx_bytes));
-
-	DLOG(buf);
-
-	// "error code: -26\\nerror message:\\nnon-mandatory-script-verify-flag
-	// (Witness program was passed an empty witness)"
-
-	// no witness stack at all!
 
 	msg = towire_channeld_splice_confirmed_signed(tmpctx, final_tx, chan_output_index);
 	wire_sync_write(MASTER_FD, take(msg));
