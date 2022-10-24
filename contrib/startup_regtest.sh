@@ -304,9 +304,6 @@ splice() {
 	echo "Transactions in mempool:"
 
 	bitcoin-cli -regtest getrawmempool
-=======
-	done
->>>>>>> e00857827fd5b45a3022753edf855df4765a4e93
 }
 
 stop_nodes() {

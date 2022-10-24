@@ -16,6 +16,10 @@ DONE * Add back all commented out verification steps
 * 
 ** add commit sig to inflight
 ** Make sure splice HTLC*commit sigs are being stored in inflight DB
+* Redo inflight process to cache a copy on channeld side instead
+*	of requesting it fresh from lightningd each time
+*
+* Update BOLT messages to reference BOLT splice PR coommit hash
 * 
 * Change splice RPC to use channel_id instead of peer_id
 *
@@ -30,6 +34,7 @@ DONE * Add back all commented out verification steps
 
 == potentially after PR / needs convos ==
 * Check the splice doesn't steal our funds before signing it
+* Implement the tx_sig signing order
 
 == after PR list ==
 * do all the RECONNECT LOGIC things

@@ -1,6 +1,6 @@
 --- wire/peer_exp_wire.csv	2021-10-18 11:43:51.851963867 -0500
 +++ -	2021-10-18 11:43:56.623816578 -0500
-@@ -127,6 +85,18 @@
+@@ -127,6 +85,17 @@
  msgtype,stfu,2
  msgdata,stfu,channel_id,channel_id,
  msgdata,stfu,initiator,u8,
@@ -15,7 +15,6 @@
 +msgdata,splice_ack,funding_pubkey,point,
 +msgtype,splice_locked,78,
 +msgdata,splice_locked,channel_id,channel_id,
-+msgdata,splice_locked,next_per_commitment_point,point,
  msgtype,shutdown,38
  msgdata,shutdown,channel_id,channel_id,
  msgdata,shutdown,len,u16,
