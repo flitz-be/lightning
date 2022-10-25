@@ -160,6 +160,9 @@ struct msg_commitment_signed {
 	struct channel_id channel_id;
 	secp256k1_ecdsa_signature signature;
 	secp256k1_ecdsa_signature *htlc_signature;
+#if EXPERIMENTAL_FEATURES
+	struct tlv_commitment_signed_tlvs tlvs;
+#endif
 };
 struct msg_node_announcement {
 	secp256k1_ecdsa_signature signature;
@@ -522,14 +525,33 @@ static struct msg_update_fulfill_htlc *fromwire_struct_update_fulfill_htlc(const
 static void *towire_struct_commitment_signed(const tal_t *ctx,
 				      const struct msg_commitment_signed *s)
 {
+#if EXPERIMENTAL_FEATURES
+	return towire_commitment_signed(ctx,
+					&s->channel_id,
+					&s->signature,
+					s->htlc_signature,
+					&s->tlvs);
+#else
 	return towire_commitment_signed(ctx,
 					&s->channel_id,
 					&s->signature,
 					s->htlc_signature);
+#endif
 }
 
 static struct msg_commitment_signed *fromwire_struct_commitment_signed(const tal_t *ctx, const void *p)
 {
+#if EXPERIMENTAL_FEATURES
+	struct msg_commitment_signed *s = tal(ctx, struct msg_commitment_signed);
+
+	if (!fromwire_commitment_signed(s, p,
+				&s->channel_id,
+				&s->signature,
+				&s->htlc_signature,
+				NULL))
+		return tal_free(s);
+	return s;
+#else
 	struct msg_commitment_signed *s = tal(ctx, struct msg_commitment_signed);
 
 	if (!fromwire_commitment_signed(s, p,
@@ -538,6 +560,7 @@ static struct msg_commitment_signed *fromwire_struct_commitment_signed(const tal
 				&s->htlc_signature))
 		return tal_free(s);
 	return s;
+#endif /* EXPERIMENTAL_FEATURES */
 }
 
 static void *towire_struct_revoke_and_ack(const tal_t *ctx,

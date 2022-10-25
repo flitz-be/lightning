@@ -387,6 +387,9 @@ static bool is_urgent(enum peer_wire type)
 	case WIRE_ONION_MESSAGE:
 #if EXPERIMENTAL_FEATURES
 	case WIRE_STFU:
+	case WIRE_SPLICE:
+	case WIRE_SPLICE_ACK:
+	case WIRE_SPLICE_LOCKED:
 #endif
 		return false;
 

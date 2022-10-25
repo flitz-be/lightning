@@ -917,9 +917,17 @@ static u8 *psbt_to_tx_sigs_msg(const tal_t *ctx,
 				       state->our_role,
 				       -1);
 
+#if EXPERIMENTAL_FEATURES
+	return towire_tx_signatures(ctx, &state->channel_id,
+				    &state->tx_state->funding.txid,
+
+				    ws,
+				    NULL);
+#else
 	return towire_tx_signatures(ctx, &state->channel_id,
 				    &state->tx_state->funding.txid,
 				    ws);
+#endif /* EXPERIMENTAL_FEATURES */
 }
 
 static void handle_tx_sigs(struct state *state, const u8 *msg)
@@ -932,10 +940,20 @@ static void handle_tx_sigs(struct state *state, const u8 *msg)
 	enum tx_role their_role = state->our_role == TX_INITIATOR ?
 		TX_ACCEPTER : TX_INITIATOR;
 
+
+#if EXPERIMENTAL_FEATURES
+	struct tlv_txsigs_tlvs *txsig_tlvs = tlv_txsigs_tlvs_new(tmpctx);
+	if (!fromwire_tx_signatures(tmpctx, msg, &cid, &txid,
+				    cast_const3(
+					 struct witness_stack ***,
+					 &ws),
+				    &txsig_tlvs))
+#else
 	if (!fromwire_tx_signatures(tmpctx, msg, &cid, &txid,
 				    cast_const3(
 					 struct witness_stack ***,
 					 &ws)))
+#endif /* EXPERIMENTAL_FEATURES */
 		open_err_fatal(state, "Bad tx_signatures %s",
 			       tal_hex(msg, msg));
 
@@ -1305,6 +1323,9 @@ static u8 *opening_negotiate_msg(const tal_t *ctx, struct state *state)
 		case WIRE_PONG:
 #if EXPERIMENTAL_FEATURES
 		case WIRE_STFU:
+		case WIRE_SPLICE:
+		case WIRE_SPLICE_ACK:
+		case WIRE_SPLICE_LOCKED:
 #endif
 			break;
 		}
@@ -1647,6 +1668,9 @@ static bool run_tx_interactive(struct state *state,
 		case WIRE_PONG:
 #if EXPERIMENTAL_FEATURES
 		case WIRE_STFU:
+		case WIRE_SPLICE:
+		case WIRE_SPLICE_ACK:
+		case WIRE_SPLICE_LOCKED:
 #endif
 			open_err_warn(state, "Unexpected wire message %s",
 				      tal_hex(tmpctx, msg));
@@ -1729,7 +1753,7 @@ static u8 *accepter_commits(struct state *state,
 	struct amount_msat our_msats;
 	struct channel_id cid;
 	const u8 *wscript;
-	u8 *msg;
+	u8 *msg, *commit_msg;
 	char *error;
 	const struct channel_type *type;
 
@@ -1771,9 +1795,18 @@ static u8 *accepter_commits(struct state *state,
 	}
 
 	remote_sig.sighash_type = SIGHASH_ALL;
+
+#if EXPERIMENTAL_FEATURES
+	struct tlv_commitment_signed_tlvs *cs_tlv
+		= tlv_commitment_signed_tlvs_new(tmpctx);
+	if (!fromwire_commitment_signed(tmpctx, msg, &cid,
+					&remote_sig.s,
+					&htlc_sigs, &cs_tlv))
+#else
 	if (!fromwire_commitment_signed(tmpctx, msg, &cid,
 					&remote_sig.s,
 					&htlc_sigs))
+#endif /* EXPERIMENTAL_FEATURES */
 		open_err_fatal(state, "Parsing commitment signed %s",
 			       tal_hex(tmpctx, msg));
 
@@ -1970,10 +2003,15 @@ static u8 *accepter_commits(struct state *state,
 		master_badmsg(WIRE_DUALOPEND_SEND_TX_SIGS, msg);
 
 	/* Send our commitment sigs over now */
-	peer_write(state->pps,
-		   take(towire_commitment_signed(NULL,
-						 &state->channel_id,
-						 &local_sig.s, NULL)));
+#if EXPERIMENTAL_FEATURES
+	commit_msg = towire_commitment_signed(NULL, &state->channel_id,
+					      &local_sig.s, NULL, NULL);
+#else
+	commit_msg = towire_commitment_signed(NULL, &state->channel_id,
+					      &local_sig.s, NULL);
+#endif /* EXPERIMENTAL_FEATURES */
+
+	peer_write(state->pps, take(commit_msg));
 	tal_free(local_commit);
 	return msg;
 }
@@ -2534,9 +2572,15 @@ static u8 *opener_commits(struct state *state,
 				    &state->our_funding_pubkey));
 
 	assert(local_sig.sighash_type == SIGHASH_ALL);
+#if EXPERIMENTAL_FEATURES
+	msg = towire_commitment_signed(tmpctx, &state->channel_id,
+				       &local_sig.s,
+				       NULL, NULL);
+#else
 	msg = towire_commitment_signed(tmpctx, &state->channel_id,
 				       &local_sig.s,
 				       NULL);
+#endif /* EXPERIMENTAL_FEATURES */
 	peer_write(state->pps, msg);
 	peer_billboard(false, "channel open: commitment sent, waiting for reply");
 
@@ -2549,9 +2593,18 @@ static u8 *opener_commits(struct state *state,
 	}
 
 	remote_sig.sighash_type = SIGHASH_ALL;
+
+#if EXPERIMENTAL_FEATURES
+	struct tlv_commitment_signed_tlvs *cs_tlv
+		= tlv_commitment_signed_tlvs_new(tmpctx);
+	if (!fromwire_commitment_signed(tmpctx, msg, &cid,
+					&remote_sig.s,
+					&htlc_sigs, &cs_tlv))
+#else
 	if (!fromwire_commitment_signed(tmpctx, msg, &cid,
 					&remote_sig.s,
 					&htlc_sigs))
+#endif /* EXPERIMENTAL_FEATURES */
 		open_err_fatal(state, "Parsing commitment signed %s",
 			       tal_hex(tmpctx, msg));
 
@@ -3782,6 +3835,9 @@ static u8 *handle_peer_in(struct state *state)
 	case WIRE_PONG:
 #if EXPERIMENTAL_FEATURES
 	case WIRE_STFU:
+	case WIRE_SPLICE:
+	case WIRE_SPLICE_ACK:
+	case WIRE_SPLICE_LOCKED:
 #endif
 		break;
 	}
