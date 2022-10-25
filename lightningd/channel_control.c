@@ -24,6 +24,15 @@
 #include <lightningd/peer_fd.h>
 #include <wally_bip32.h>
 
+struct splice_command {
+	/* Inside struct lightningd close_commands. */
+	struct list_node list;
+	/* Command structure. This is the parent of the close command. */
+	struct command *cmd;
+	/* Channel being spliced. */
+	struct channel *channel;
+};
+
 static void update_feerates(struct lightningd *ld, struct channel *channel)
 {
 	u8 *msg;
@@ -1109,6 +1118,240 @@ void channel_replace_update(struct channel *channel, u8 *update TAKES)
 		      take(towire_channeld_channel_update(NULL,
 							  channel->channel_update)));
 }
+
+static struct channel *splice_load_channel(struct command *cmd,
+					   struct node_id *id,
+					   struct command_result **error)
+{
+	struct channel *channel;
+	struct peer *peer;
+
+	*error = NULL;
+
+	peer = peer_by_id(cmd->ld, id);
+	if (!peer) {
+		*error = command_fail(cmd, FUNDING_UNKNOWN_PEER, "Unknown peer");
+		return NULL;
+	}
+
+	/* DTODO: Swap peer_id for channel_id */
+	channel = peer_any_active_channel(peer, NULL);
+	if (!channel) {
+		*error = command_fail(cmd, LIGHTNINGD, "Peer does not have channel");
+		return NULL;
+	}
+
+	/* DTODO: Register splicing feature bits and change check below */
+	if (!feature_negotiated(cmd->ld->our_features,
+			        peer->their_features,
+				OPT_DUAL_FUND)) {
+		*error = command_fail(cmd, FUNDING_V2_NOT_SUPPORTED,
+				    "v2 openchannel not supported "
+				    "by peer");
+		return NULL;
+	}
+
+	if (!channel->owner) {
+		*error = command_fail(cmd, SPLICE_WRONG_OWNER,
+				    "Channel is disconnected");
+		return NULL;
+	}
+
+	if(!streq(channel->owner->name, "channeld")) {
+		*error = command_fail(cmd,
+				    SPLICE_WRONG_OWNER,
+				    "Channel hasn't finished connecting or in "
+				    "abnormal owner state %s",
+				    channel->owner->name);
+		return NULL;
+	}
+
+	return channel;
+}
+
+static struct command_result *json_splice_init(struct command *cmd,
+					       const char *buffer,
+					       const jsmntok_t *obj UNNEEDED,
+					       const jsmntok_t *params)
+{
+	struct node_id *id;
+	struct channel *channel;
+	struct splice_command *cc;
+	struct command_result *error;
+
+	if(!param(cmd, buffer, params,
+		  p_opt("id", param_node_id, &id),
+		  NULL))
+		return command_param_failed();
+
+	channel = splice_load_channel(cmd, id, &error);
+	if (error)
+		return error;
+
+	cc = tal(NULL, struct splice_command);
+
+	list_add_tail(&cmd->ld->splice_commands, &cc->list);
+
+	cc->cmd = tal_steal(cc, cmd);
+	cc->channel = channel;
+
+	/*
+	subd_send_msg(channel->owner, take(towire_channeld_splice_init(NULL)));
+	*/
+
+	return command_still_pending(cmd);
+}
+
+static struct command_result *json_splice_update(struct command *cmd,
+						 const char *buffer,
+						 const jsmntok_t *obj UNNEEDED,
+						 const jsmntok_t *params)
+{
+	struct node_id *id;
+	struct channel *channel;
+	struct splice_command *cc;
+	struct wally_psbt *psbt;
+	struct command_result *error;
+
+	if(!param(cmd, buffer, params,
+		  p_opt("id", param_node_id, &id),
+		  p_opt("psbt", param_psbt, &psbt),
+		  NULL))
+		return command_param_failed();
+
+	channel = splice_load_channel(cmd, id, &error);
+	if (error)
+		return error;
+
+	cc = tal(NULL, struct splice_command);
+
+	list_add_tail(&cmd->ld->splice_commands, &cc->list);
+
+	cc->cmd = tal_steal(cc, cmd);
+	cc->channel = channel;
+
+	/*
+	subd_send_msg(channel->owner,
+		      take(towire_channeld_splice_update(NULL, psbt)));
+	*/
+
+	return command_still_pending(cmd);
+}
+
+static struct command_result *json_splice_finalize(struct command *cmd,
+						 const char *buffer,
+						 const jsmntok_t *obj UNNEEDED,
+						 const jsmntok_t *params)
+{
+	struct node_id *id;
+	struct channel *channel;
+	struct splice_command *cc;
+	struct command_result *error;
+
+	if(!param(cmd, buffer, params,
+		  p_opt("id", param_node_id, &id),
+		  NULL))
+		return command_param_failed();
+
+	channel = splice_load_channel(cmd, id, &error);
+	if (error)
+		return error;
+
+	cc = tal(NULL, struct splice_command);
+
+	list_add_tail(&cmd->ld->splice_commands, &cc->list);
+
+	cc->cmd = tal_steal(cc, cmd);
+	cc->channel = channel;
+
+	/*
+	subd_send_msg(channel->owner,
+		      take(towire_channeld_splice_finalize(NULL)));
+	*/
+
+	return command_still_pending(cmd);
+}
+
+static struct command_result *json_splice_signed(struct command *cmd,
+						 const char *buffer,
+						 const jsmntok_t *obj UNNEEDED,
+						 const jsmntok_t *params)
+{
+	struct node_id *id;
+	u8 *msg;
+	struct channel *channel;
+	struct splice_command *cc;
+	struct wally_psbt *psbt;
+	struct command_result *error;
+
+	if(!param(cmd, buffer, params,
+		  p_opt("id", param_node_id, &id),
+		  p_opt("psbt", param_psbt, &psbt),
+		  NULL))
+		return command_param_failed();
+
+	channel = splice_load_channel(cmd, id, &error);
+	if (error)
+		return error;
+
+	cc = tal(NULL, struct splice_command);
+
+	list_add_tail(&cmd->ld->splice_commands, &cc->list);
+
+	cc->cmd = tal_steal(cc, cmd);
+	cc->channel = channel;
+
+	assert(channel);
+	assert(channel->owner);
+
+	/*
+	msg = towire_channeld_splice_signed(tmpctx, psbt);
+	subd_send_msg(channel->owner, take(msg));
+	*/
+
+	return command_still_pending(cmd);
+}
+
+static const struct json_command splice_init_command = {
+	"splice_init",
+	"channels",
+	json_splice_init,
+	"Init a channel splice to {id} with {initialpsbt} for {amount} satoshis. "
+	"Returns updated {psbt} with (partial) contributions from peer"
+};
+AUTODATA(json_command, &splice_init_command);
+
+static const struct json_command splice_update_command = {
+	"splice_update",
+	"channels",
+	json_splice_update,
+	"Update {channel_id} currently active negotiated splice with {psbt}. "
+	""
+	"Returns updated {psbt} with (partial) contributions from peer. "
+	"If {commitments_secured} is true, next call may be to splicechannel_finalize, "
+	"otherwise keep calling splice_update passing back in the returned PSBT until "
+	"{commitments_secured} is true."
+};
+AUTODATA(json_command, &splice_update_command);
+
+/* DTODO: Remove splice_finalize. Instead it's done as a splice_update call 
+ * with no changes to PSBT. */
+static const struct json_command splice_finalize_command = {
+	"splice_finalize",
+	"channels",
+	json_splice_finalize,
+	"Finalize a {id} splice by filling in channel output amount. "
+	"Resulting PSBT is returned for signing."
+};
+AUTODATA(json_command, &splice_finalize_command);
+
+static const struct json_command splice_signed_command = {
+	"splice_signed",
+	"channels",
+	json_splice_signed,
+	"Send our {signed_psbt}'s tx sigs for {channel_id}."
+};
+AUTODATA(json_command, &splice_signed_command);
 
 #if DEVELOPER
 static struct command_result *json_dev_feerate(struct command *cmd,
