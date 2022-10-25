@@ -728,7 +728,8 @@ void channel_set_state(struct channel *channel,
 	struct timeabs timestamp;
 
 	/* set closer, if known */
-	if (state > CHANNELD_NORMAL && channel->closer == NUM_SIDES) {
+	if (!(state == CHANNELD_AWAITING_SPLICE)
+	    && state > CHANNELD_NORMAL && channel->closer == NUM_SIDES) {
 		if (reason == REASON_LOCAL)   channel->closer = LOCAL;
 		if (reason == REASON_USER)    channel->closer = LOCAL;
 		if (reason == REASON_REMOTE)  channel->closer = REMOTE;
