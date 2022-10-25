@@ -1822,6 +1822,10 @@ static enum watch_result funding_depth_cb(struct lightningd *ld,
 										  &channel->peer->id,
 										  channel->peer->connectd_counter,
 										  warning)));
+		}
+		else if (channel->state != CHANNELD_AWAITING_SPLICE
+			&& !short_channel_id_eq(channel->scid, &scid)) {
+
 			/* When we restart channeld, it will be initialized with updated scid
 			 * and also adds it (at least our halve_chan) to rtable. */
 			channel_fail_transient_delayreconnect(channel,
@@ -1855,10 +1859,22 @@ static enum watch_result funding_spent(struct channel *channel,
 				       const struct block *block)
 {
 	struct bitcoin_txid txid;
+	struct channel_inflight *inflight;
+
 	bitcoin_txid(tx, &txid);
 
 	wallet_channeltxs_add(channel->peer->ld->wallet, channel,
 			      WIRE_ONCHAIND_INIT, &txid, 0, block->height);
+
+	/* If we're doing a splice, we expect the funding transaction to be
+	 * spent, so don't freak out and just keep watching in that case */
+	list_for_each(&channel->inflights, inflight, list) {
+		if (bitcoin_txid_eq(&txid,
+				    &inflight->funding->outpoint.txid)) {
+			return KEEP_WATCHING;
+		}
+	}
+
 	return onchaind_funding_spent(channel, tx, block->height);
 }
 
@@ -1884,9 +1900,9 @@ void channel_watch_funding(struct lightningd *ld, struct channel *channel)
 	channel_watch_wrong_funding(ld, channel);
 }
 
-static void channel_watch_inflight(struct lightningd *ld,
-				   struct channel *channel,
-				   struct channel_inflight *inflight)
+void channel_watch_inflight(struct lightningd *ld,
+			    struct channel *channel,
+			    struct channel_inflight *inflight)
 {
 	/* FIXME: Remove arg from cb? */
 	watch_txid(channel, ld->topology, channel,
