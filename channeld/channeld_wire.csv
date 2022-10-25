@@ -159,6 +159,8 @@ msgdata,channeld_got_commitsig,failed,failed_htlc,num_failed
 msgdata,channeld_got_commitsig,num_changed,u16,
 msgdata,channeld_got_commitsig,changed,changed_htlc,num_changed
 msgdata,channeld_got_commitsig,tx,bitcoin_tx,
+msgdata,channeld_got_commitsig,num_splice_sigs,u16,
+msgdata,channeld_got_commitsig,splice_commit_sig,bitcoin_signature,num_splice_sigs
 
 # Wait for reply, to make sure it's on disk before we send revocation.
 msgtype,channeld_got_commitsig_reply,1121

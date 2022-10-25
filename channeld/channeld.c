@@ -1539,7 +1539,8 @@ static void send_revocation(struct peer *peer,
 			    const struct htlc **changed_htlcs,
 			    const struct bitcoin_tx *committx,
 			    const struct secret *old_secret,
-			    const struct pubkey *next_point)
+			    const struct pubkey *next_point,
+			    struct tlv_commitment_signed_tlvs *cs_tlv)
 {
 	struct changed_htlc *changed;
 	struct fulfilled_htlc *fulfilled;
@@ -1585,7 +1586,8 @@ static void send_revocation(struct peer *peer,
 					       fulfilled,
 					       failed,
 					       changed,
-					       committx);
+					       committx,
+					       cs_tlv);
 	master_wait_sync_reply(tmpctx, peer, take(msg_for_master),
 			       WIRE_CHANNELD_GOT_COMMITSIG_REPLY);
 
@@ -1755,8 +1757,13 @@ static void handle_peer_commit_sig(struct peer *peer, const u8 *msg)
 			      "Reading validate_commitment_tx reply: %s",
 			      tal_hex(tmpctx, msg2));
 
+#if EXPERIMENTAL_FEATURES
 	send_revocation(peer, &commit_sig, htlc_sigs, changed_htlcs, txs[0],
-			old_secret, &next_point);
+			old_secret, &next_point, cs_tlv);
+#else
+	send_revocation(peer, &commit_sig, htlc_sigs, changed_htlcs, txs[0],
+			old_secret, &next_point, NULL);
+#endif
 
 	/* We may now be quiescent on our side. */
 	maybe_send_stfu(peer);
