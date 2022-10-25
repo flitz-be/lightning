@@ -691,7 +691,7 @@ static void check_mutual_splice_locked(struct peer *peer)
 	peer->have_sigs[LOCAL] = false;
 	peer->have_sigs[REMOTE] = false;
 
-	msg = towire_channeld_got_splice_locked(NULL, &peer->remote_per_commit);
+	msg = towire_channeld_got_splice_locked(NULL);
 	wire_sync_write(MASTER_FD, take(msg));
 	channel_announcement_negotiate(peer);
 	billboard_update(peer);

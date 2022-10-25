@@ -125,7 +125,6 @@ msgdata,channeld_got_channel_ready,alias,?short_channel_id,
 
 # When we receive funding_locked.
 msgtype,channeld_got_splice_locked,1119
-msgdata,channeld_got_splice_locked,next_per_commit_point,pubkey,
 
 #include <common/penalty_base.h>
 
@@ -234,10 +233,6 @@ msgdata,channeld_splice_confirmed_signed,output_index,u32,
 msgtype,channeld_inflight_mindepth,7214
 msgdata,channeld_inflight_mindepth,tx_id,bitcoin_txid,
 msgdata,channeld_inflight_mindepth,depth,u32,
-
-# When we receive splice_locked.
-msgtype,channeld_got_splice_locked,7215
-msgdata,channeld_got_splice_locked,next_per_commit_point,pubkey,
 
 # channeld->master: Add an inflight to the DB
 msgtype,channeld_add_inflight,7216
