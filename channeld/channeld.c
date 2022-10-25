@@ -4622,8 +4622,7 @@ static void handle_funding_depth(struct peer *peer, const u8 *msg)
 
 	if (depth < peer->channel->minimum_depth)
 		peer->depth_togo = peer->channel->minimum_depth - depth;
-
-	} else if(depth >= 6) {
+	else {
 		peer->depth_togo = 0;
 
 		/* If we know an actual short_channel_id prefer to use
