@@ -14,16 +14,17 @@ import time
 def test_splice(node_factory, bitcoind):
     l1 = node_factory.get_node()
     l2 = node_factory.get_node()
+
+    chan_size = 4000000
     
     l1.rpc.connect(l2.rpc.getinfo()['id'], 'localhost:%d' % l2.port)
-    l1.openchannel(l2, 4000000)
-
-    result = l1.rpc.splice_init(l2.rpc.getinfo()['id'])
+    l1.openchannel(l2, chan_size)
 
     funds_result = l1.rpc.fundpsbt("100000sat", "slow", 166)
 
-    result = bitcoind.rpc.joinpsbts([result['psbt'], funds_result['psbt']])
-    result = l1.rpc.splice_update(l2.rpc.getinfo()['id'], result)
+    chan_size += 100000
+
+    result = l1.rpc.splice_init(l2.rpc.getinfo()['id'], chan_size, funds_result['psbt'])
     result = l1.rpc.splice_finalize(l2.rpc.getinfo()['id'])
     result = l1.rpc.signpsbt(result['psbt'])
     result = l1.rpc.splice_signed(l2.rpc.getinfo()['id'], result['signed_psbt'])

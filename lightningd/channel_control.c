@@ -28,9 +28,9 @@
 #include <fcntl.h>
 
 struct splice_command {
-	/* Inside struct lightningd close_commands. */
+	/* Inside struct lightningd splice_commands. */
 	struct list_node list;
-	/* Command structure. This is the parent of the close command. */
+	/* Command structure. This is the parent of the splice command. */
 	struct command *cmd;
 	/* Channel being spliced. */
 	struct channel *channel;
@@ -1689,11 +1689,19 @@ static struct command_result *json_splice_init(struct command *cmd,
 	struct channel *channel;
 	struct splice_command *cc;
 	struct command_result *error;
+	struct wally_psbt *initialpsbt;
+	struct amount_sat *amount;
+	u8 *msg;
 
 	if(!param(cmd, buffer, params,
-		  p_opt("id", param_node_id, &id),
+		  p_req("id", param_node_id, &id),
+		  p_req("amount", param_sat, &amount),
+		  p_opt("initialpsbt", param_psbt, &initialpsbt),
 		  NULL))
 		return command_param_failed();
+
+	if(!initialpsbt)
+		initialpsbt = create_psbt(cmd, 0, 0, 0);
 
 	channel = splice_load_channel(cmd, id, &error);
 	if (error)
@@ -1706,7 +1714,9 @@ static struct command_result *json_splice_init(struct command *cmd,
 	cc->cmd = tal_steal(cc, cmd);
 	cc->channel = channel;
 
-	subd_send_msg(channel->owner, take(towire_channeld_splice_init(NULL)));
+	msg = towire_channeld_splice_init(NULL, initialpsbt, *amount);
+
+	subd_send_msg(channel->owner, take(msg));
 	return command_still_pending(cmd);
 }
 
@@ -1722,8 +1732,8 @@ static struct command_result *json_splice_update(struct command *cmd,
 	struct command_result *error;
 
 	if(!param(cmd, buffer, params,
-		  p_opt("id", param_node_id, &id),
-		  p_opt("psbt", param_psbt, &psbt),
+		  p_req("id", param_node_id, &id),
+		  p_req("psbt", param_psbt, &psbt),
 		  NULL))
 		return command_param_failed();
 
@@ -1754,7 +1764,7 @@ static struct command_result *json_splice_finalize(struct command *cmd,
 	struct command_result *error;
 
 	if(!param(cmd, buffer, params,
-		  p_opt("id", param_node_id, &id),
+		  p_req("id", param_node_id, &id),
 		  NULL))
 		return command_param_failed();
 
@@ -1787,8 +1797,8 @@ static struct command_result *json_splice_signed(struct command *cmd,
 	struct command_result *error;
 
 	if(!param(cmd, buffer, params,
-		  p_opt("id", param_node_id, &id),
-		  p_opt("psbt", param_psbt, &psbt),
+		  p_req("id", param_node_id, &id),
+		  p_req("psbt", param_psbt, &psbt),
 		  NULL))
 		return command_param_failed();
 
@@ -1815,7 +1825,7 @@ static const struct json_command splice_init_command = {
 	"splice_init",
 	"channels",
 	json_splice_init,
-	"Init a channel splice to {id} with {initialpsbt} for {amount} satoshis. "
+	"Init a channel splice to {id} for {amount} satoshis with {initialpsbt}. "
 	"Returns updated {psbt} with (partial) contributions from peer"
 };
 AUTODATA(json_command, &splice_init_command);

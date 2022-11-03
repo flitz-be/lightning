@@ -191,6 +191,8 @@ msgtype,channeld_got_revoke_reply,1122
 
 # master->channeld: hello, I'd like to start a channel splice open
 msgtype,channeld_splice_init,7204
+msgdata,channeld_splice_init,psbt,wally_psbt,
+msgdata,channeld_splice_init,funding_amount,amount_sat,
 
 # channeld->master: hello, I started a channel splice open
 msgtype,channeld_splice_confirmed_init,7205

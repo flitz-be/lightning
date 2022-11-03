@@ -1125,10 +1125,12 @@ class LightningRpc(UnixDomainSocketRpc):
         }
         return self.call("openchannel_abort", payload)
 
-    def splice_init(self, peer_id):
+    def splice_init(self, peer_id, amount, initialpsbt):
         """ Initiate a splice """
         payload = {
-            "id": peer_id
+            "id": peer_id,
+            "amount": amount
+            "initialpsbt": initialpsbt,
         }
         return self.call("splice_init", payload)
 
