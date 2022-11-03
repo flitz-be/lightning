@@ -28,9 +28,9 @@
 #include <fcntl.h>
 
 struct splice_command {
-	/* Inside struct lightningd close_commands. */
+	/* Inside struct lightningd splice_commands. */
 	struct list_node list;
-	/* Command structure. This is the parent of the close command. */
+	/* Command structure. This is the parent of the splice command. */
 	struct command *cmd;
 	/* Channel being spliced. */
 	struct channel *channel;
