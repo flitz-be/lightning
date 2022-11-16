@@ -105,6 +105,7 @@ ARG DEVELOPER=0
 ENV PYTHON_VERSION=3
 RUN curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/install-poetry.py | python3 - \
     && pip3 install -U pip \
+    && pip3 install -U mako \
     && pip3 install -U wheel \
     && /root/.local/bin/poetry config virtualenvs.create false \
     && /root/.local/bin/poetry install
