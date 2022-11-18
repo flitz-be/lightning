@@ -107,8 +107,8 @@ RUN curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/inst
     && pip3 install -U pip \
     && pip3 install -U mako \
     && pip3 install -U wheel \
-    && /root/.local/bin/poetry config virtualenvs.create false \
-    && /root/.local/bin/poetry install
+    && /root/.local/bin/poetry export --without-hashes -o requirements.txt \
+    && pip3 install -r requirements.txt
 
 RUN ./configure --prefix=/tmp/lightning_install --enable-static && make -j3 DEVELOPER=${DEVELOPER} && make install
 
