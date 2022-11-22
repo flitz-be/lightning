@@ -101,7 +101,7 @@ WORKDIR /opt/lightningd
 COPY . /tmp/lightning
 RUN git clone --recursive /tmp/lightning . && \
     git checkout $(git --work-tree=/tmp/lightning --git-dir=/tmp/lightning/.git rev-parse HEAD)
-ARG DEVELOPER=0
+ARG DEVELOPER=1
 ENV PYTHON_VERSION=3
 RUN curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/install-poetry.py | python3 - \
     && pip3 install -U pip \
@@ -109,7 +109,7 @@ RUN curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/inst
     && /root/.local/bin/poetry config virtualenvs.create false \
     && /root/.local/bin/poetry install
 
-RUN ./configure --prefix=/tmp/lightning_install --enable-static && make -j3 DEVELOPER=${DEVELOPER} && make install
+RUN ./configure --prefix=/tmp/lightning_install --enable-static --enable-experimental-features --enable-developer && make -j3 DEVELOPER=${DEVELOPER} && make install
 
 FROM debian:bullseye-slim as final
 
