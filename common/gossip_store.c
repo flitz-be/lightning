@@ -94,6 +94,9 @@ static bool public_msg_type(enum peer_wire type)
 	case WIRE_ONION_MESSAGE:
 #if EXPERIMENTAL_FEATURES
 	case WIRE_STFU:
+	case WIRE_SPLICE:
+	case WIRE_SPLICE_ACK:
+	case WIRE_SPLICE_LOCKED:
 #endif
 		return false;
 	case WIRE_CHANNEL_ANNOUNCEMENT:

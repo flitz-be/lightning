@@ -90,12 +90,21 @@ struct wally_psbt *new_psbt(const tal_t *ctx, const struct wally_tx *wtx)
 								     wtx->inputs[i].script,
 								     wtx->inputs[i].script_len);
 			assert(wally_err == WALLY_OK);
+
+			/* Clear out script sig data */
+			psbt->tx->inputs[i].script_len = 0;
+			tal_free(psbt->tx->inputs[i].script);
+			psbt->tx->inputs[i].script = NULL;
 		}
 		if (wtx->inputs[i].witness) {
 			wally_err =
 				wally_psbt_input_set_final_witness(&psbt->inputs[i],
 								   wtx->inputs[i].witness);
 			assert(wally_err == WALLY_OK);
+
+			/* Delete the witness data */
+			wally_tx_witness_stack_free(psbt->tx->inputs[i].witness);
+			psbt->tx->inputs[i].witness = NULL;
 		}
 	}
 
@@ -112,7 +121,7 @@ bool psbt_is_finalized(const struct wally_psbt *psbt)
 }
 
 struct wally_psbt_input *psbt_add_input(struct wally_psbt *psbt,
-					struct wally_tx_input *input,
+					const struct wally_tx_input *input,
 				       	size_t insert_at)
 {
 	const u32 flags = WALLY_PSBT_FLAG_NON_FINAL; /* Skip script/witness */

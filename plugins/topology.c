@@ -332,7 +332,10 @@ static struct node_map *local_connected(const tal_t *ctx,
 		json_for_each_arr(j, c, chans) {
 			if (json_tok_streq(buf,
 					   json_get_member(buf, c, "state"),
-					   "CHANNELD_NORMAL"))
+					   "CHANNELD_NORMAL")
+				|| json_tok_streq(buf,
+					   json_get_member(buf, c, "state"),
+					   "CHANNELD_AWAITING_SPLICE"))
 				normal_chan = true;
 		}
 

@@ -1117,6 +1117,7 @@ static void connect_activate_subd(struct lightningd *ld, struct channel *channel
 
 	case CHANNELD_AWAITING_LOCKIN:
 	case CHANNELD_NORMAL:
+	case CHANNELD_AWAITING_SPLICE:
 	case CHANNELD_SHUTTING_DOWN:
 	case CLOSINGD_SIGEXCHANGE:
 		assert(!channel->owner);
@@ -1756,10 +1757,13 @@ static enum watch_result funding_depth_cb(struct lightningd *ld,
 	tal_free(txidstr);
 
 	bool min_depth_reached = depth >= channel->minimum_depth;
+	bool min_depth_no_scid = min_depth_reached && !channel->scid;
+	bool some_depth_has_scid = depth && channel->scid;
 
 	/* Reorg can change scid, so always update/save scid when possible (depth=0
 	 * means the stale block with our funding tx was removed) */
-	if ((min_depth_reached && !channel->scid) || (depth && channel->scid)) {
+	if (channel->state != CHANNELD_AWAITING_SPLICE
+	    && (min_depth_no_scid || some_depth_has_scid)) {
 		struct txlocator *loc;
 		struct channel_inflight *inf;
 
@@ -1818,6 +1822,10 @@ static enum watch_result funding_depth_cb(struct lightningd *ld,
 										  &channel->peer->id,
 										  channel->peer->connectd_counter,
 										  warning)));
+		}
+		else if (channel->state != CHANNELD_AWAITING_SPLICE
+			&& !short_channel_id_eq(channel->scid, &scid)) {
+
 			/* When we restart channeld, it will be initialized with updated scid
 			 * and also adds it (at least our halve_chan) to rtable. */
 			channel_fail_transient_delayreconnect(channel,
@@ -1851,10 +1859,22 @@ static enum watch_result funding_spent(struct channel *channel,
 				       const struct block *block)
 {
 	struct bitcoin_txid txid;
+	struct channel_inflight *inflight;
+
 	bitcoin_txid(tx, &txid);
 
 	wallet_channeltxs_add(channel->peer->ld->wallet, channel,
 			      WIRE_ONCHAIND_INIT, &txid, 0, block->height);
+
+	/* If we're doing a splice, we expect the funding transaction to be
+	 * spent, so don't freak out and just keep watching in that case */
+	list_for_each(&channel->inflights, inflight, list) {
+		if (bitcoin_txid_eq(&txid,
+				    &inflight->funding->outpoint.txid)) {
+			return KEEP_WATCHING;
+		}
+	}
+
 	return onchaind_funding_spent(channel, tx, block->height);
 }
 
@@ -1880,9 +1900,9 @@ void channel_watch_funding(struct lightningd *ld, struct channel *channel)
 	channel_watch_wrong_funding(ld, channel);
 }
 
-static void channel_watch_inflight(struct lightningd *ld,
-				   struct channel *channel,
-				   struct channel_inflight *inflight)
+void channel_watch_inflight(struct lightningd *ld,
+			    struct channel *channel,
+			    struct channel_inflight *inflight)
 {
 	/* FIXME: Remove arg from cb? */
 	watch_txid(channel, ld->topology, channel,
@@ -2646,6 +2666,7 @@ static struct command_result *json_setchannelfee(struct command *cmd,
 			struct channel *channel;
 			list_for_each(&peer->channels, channel, list) {
 				if (channel->state != CHANNELD_NORMAL &&
+				    channel->state != CHANNELD_AWAITING_SPLICE &&
 				    channel->state != CHANNELD_AWAITING_LOCKIN &&
 				    channel->state != DUALOPEND_AWAITING_LOCKIN)
 					continue;
