@@ -105,16 +105,17 @@ ARG DEVELOPER=1
 ENV PYTHON_VERSION=3
 RUN curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/install-poetry.py | python3 - \
     && pip3 install -U pip \
+    && pip3 install -U mako \
     && pip3 install -U wheel \
-    && /root/.local/bin/poetry config virtualenvs.create false \
-    && /root/.local/bin/poetry install
+    && /root/.local/bin/poetry export --without-hashes -o requirements.txt \
+    && pip3 install -r requirements.txt
 
 RUN ./configure --prefix=/tmp/lightning_install --enable-static --enable-experimental-features --enable-developer && make -j3 DEVELOPER=${DEVELOPER} && make install
 
 FROM debian:bullseye-slim as final
 
 COPY --from=downloader /opt/tini /usr/bin/tini
-RUN apt-get update && apt-get install -y --no-install-recommends socat inotify-tools python3 python3-pip libpq5\
+RUN apt-get update && apt-get install -y --no-install-recommends socat inotify-tools python3 python3-pip python3-mako libpq5\
     && rm -rf /var/lib/apt/lists/*
 
 ENV LIGHTNINGD_DATA=/root/.lightning
